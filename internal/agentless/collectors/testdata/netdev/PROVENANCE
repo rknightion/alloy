@@ -1,0 +1,6 @@
+Weaker self-authored golden, not a node_exporter e2e oracle.
+Input captured read-only via SSH as alloyscrape from alloy-ssh-ubuntu.rob-knight.net
+on 2026-10-05, using cat /proc/net/dev. No target changes.
+Golden independently transcribes the 16 Linux columns into legacy network counters.
+Names/help/default empty include and exclude verified against the pinned
+grafana/node_exporter collector/netdev_common.go, netdev_linux.go and kingpinconfig/flags.go.
