@@ -171,7 +171,10 @@ func (s *targetServer) connection(c *blackholeConn, host ssh.Signer) {
 				}
 				cmd := exec.CommandContext(ctx, "sh", "-s")
 				cmd.Stdin, cmd.Stdout, cmd.Stderr = strings.NewReader(string(script)), channel, io.Discard
-				cmd.WaitDelay = 100 * time.Millisecond
+				// Cold 500-target waves can delay SSH stdout-copy scheduling
+				// beyond 100ms even after sh exits. Keep a finite drain bound
+				// without truncating valid output at that artificial threshold.
+				cmd.WaitDelay = time.Second
 				err := cmd.Run()
 				cancel()
 				s.mu.Lock()
