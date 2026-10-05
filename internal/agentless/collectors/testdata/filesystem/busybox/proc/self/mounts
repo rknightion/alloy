@@ -1,0 +1,14 @@
+overlay / overlay rw,relatime,lowerdir=/var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/168417/fs:/var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/167795/fs,upperdir=/var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/168418/fs,workdir=/var/lib/docker/containerd/daemon/io.containerd.snapshotter.v1.overlayfs/snapshots/168418/work 0 0
+proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
+tmpfs /dev tmpfs rw,nosuid,size=65536k,mode=755 0 0
+devpts /dev/pts devpts rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=666 0 0
+sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0
+cgroup /sys/fs/cgroup cgroup2 rw,nosuid,nodev,noexec,relatime,nsdelegate 0 0
+mqueue /dev/mqueue mqueue rw,nosuid,nodev,noexec,relatime 0 0
+shm /dev/shm tmpfs rw,nosuid,nodev,noexec,relatime,size=11290624k 0 0
+/dev/vdb1 /etc/resolv.conf btrfs rw,noatime,nodatasum,nodatacow,ssd,discard,space_cache=v2,subvolid=256,subvol=/docker 0 0
+/dev/vdb1 /etc/hostname btrfs rw,noatime,nodatasum,nodatacow,ssd,discard,space_cache=v2,subvolid=256,subvol=/docker 0 0
+/dev/vdb1 /etc/hosts btrfs rw,noatime,nodatasum,nodatacow,ssd,discard,space_cache=v2,subvolid=256,subvol=/docker 0 0
+source /proof/original tmpfs rw,relatime,size=4096k 0 0
+source /proof/duplicate tmpfs rw,relatime,size=4096k 0 0
+source\040with\040spaces /proof/space\040mount tmpfs rw,relatime,size=2048k 0 0

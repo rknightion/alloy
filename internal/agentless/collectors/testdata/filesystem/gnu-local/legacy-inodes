@@ -1,0 +1,7 @@
+Filesystem         Type     Inodes IUsed   IFree IUse% Mounted on
+overlay            overlay       0     0       0     - /
+tmpfs              tmpfs   2822707    63 2822644    1% /dev
+shm                tmpfs   2822707     1 2822706    1% /dev/shm
+/dev/vdb1          btrfs         0     0       0     - /etc/hosts
+source             tmpfs   2822707     1 2822706    1% /proof/original
+source with spaces tmpfs   2822707     1 2822706    1% /proof/space mount

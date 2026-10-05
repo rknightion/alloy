@@ -1,0 +1,2 @@
+Filesystem                       Type Inodes IUsed  IFree IUse% Mounted on
+/dev/mapper/pve-vm--107--disk--0 ext4 262144 27389 234755   11% /

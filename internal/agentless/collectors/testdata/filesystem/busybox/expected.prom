@@ -1,0 +1,62 @@
+# Weaker self-authored golden from real busybox df output; not a node_exporter e2e oracle.
+# df -akPT rounds to 1024-byte blocks; size/avail may differ from statfs by <1024 bytes,
+# and free=(size-used)*1024 may differ by <2048 bytes. Inodes are unscaled.
+# GNU lab output recorded read-only over SSH; local GNU and BusyBox 1.37 output recorded
+# in invocation-owned containers with tmpfs source names containing spaces and a bind mount.
+# legacy-* preserves actual df output without -a for duplicate-mount regression proof.
+# HELP node_filesystem_size_bytes Filesystem size in bytes.
+# TYPE node_filesystem_size_bytes gauge
+node_filesystem_size_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 481908752384
+node_filesystem_size_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 481908752384
+node_filesystem_size_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 481908752384
+node_filesystem_size_bytes{device="source",fstype="tmpfs",mountpoint="/proof/original"} 4194304
+node_filesystem_size_bytes{device="source",fstype="tmpfs",mountpoint="/proof/duplicate"} 4194304
+node_filesystem_size_bytes{device="source with spaces",fstype="tmpfs",mountpoint="/proof/space mount"} 2097152
+# HELP node_filesystem_avail_bytes Filesystem space available to non-root users in bytes.
+# TYPE node_filesystem_avail_bytes gauge
+node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 387735781376
+node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 387735781376
+node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 387735781376
+node_filesystem_avail_bytes{device="source",fstype="tmpfs",mountpoint="/proof/original"} 4194304
+node_filesystem_avail_bytes{device="source",fstype="tmpfs",mountpoint="/proof/duplicate"} 4194304
+node_filesystem_avail_bytes{device="source with spaces",fstype="tmpfs",mountpoint="/proof/space mount"} 2097152
+# HELP node_filesystem_free_bytes Filesystem free space in bytes.
+# TYPE node_filesystem_free_bytes gauge
+node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 387735781376
+node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 387735781376
+node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 387735781376
+node_filesystem_free_bytes{device="source",fstype="tmpfs",mountpoint="/proof/original"} 4194304
+node_filesystem_free_bytes{device="source",fstype="tmpfs",mountpoint="/proof/duplicate"} 4194304
+node_filesystem_free_bytes{device="source with spaces",fstype="tmpfs",mountpoint="/proof/space mount"} 2097152
+# HELP node_filesystem_files Filesystem total file nodes.
+# TYPE node_filesystem_files gauge
+node_filesystem_files{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 0
+node_filesystem_files{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 0
+node_filesystem_files{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 0
+node_filesystem_files{device="source",fstype="tmpfs",mountpoint="/proof/original"} 2822707
+node_filesystem_files{device="source",fstype="tmpfs",mountpoint="/proof/duplicate"} 2822707
+node_filesystem_files{device="source with spaces",fstype="tmpfs",mountpoint="/proof/space mount"} 2822707
+# HELP node_filesystem_files_free Filesystem total free file nodes.
+# TYPE node_filesystem_files_free gauge
+node_filesystem_files_free{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 0
+node_filesystem_files_free{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 0
+node_filesystem_files_free{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 0
+node_filesystem_files_free{device="source",fstype="tmpfs",mountpoint="/proof/original"} 2822706
+node_filesystem_files_free{device="source",fstype="tmpfs",mountpoint="/proof/duplicate"} 2822706
+node_filesystem_files_free{device="source with spaces",fstype="tmpfs",mountpoint="/proof/space mount"} 2822706
+# HELP node_filesystem_readonly Filesystem read-only status.
+# TYPE node_filesystem_readonly gauge
+node_filesystem_readonly{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 0
+node_filesystem_readonly{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 0
+node_filesystem_readonly{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 0
+node_filesystem_readonly{device="source",fstype="tmpfs",mountpoint="/proof/original"} 0
+node_filesystem_readonly{device="source",fstype="tmpfs",mountpoint="/proof/duplicate"} 0
+node_filesystem_readonly{device="source with spaces",fstype="tmpfs",mountpoint="/proof/space mount"} 0
+# HELP node_filesystem_device_error Whether an error occurred while getting statistics for the given device.
+# TYPE node_filesystem_device_error gauge
+node_filesystem_device_error{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 0
+node_filesystem_device_error{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 0
+node_filesystem_device_error{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 0
+node_filesystem_device_error{device="source",fstype="tmpfs",mountpoint="/proof/original"} 0
+node_filesystem_device_error{device="source",fstype="tmpfs",mountpoint="/proof/duplicate"} 0
+node_filesystem_device_error{device="source with spaces",fstype="tmpfs",mountpoint="/proof/space mount"} 0

@@ -1,0 +1,2 @@
+Filesystem                       Type 1024-blocks   Used Available Capacity Mounted on
+/dev/mapper/pve-vm--107--disk--0 ext4     4046560 848440   2972024      23% /
