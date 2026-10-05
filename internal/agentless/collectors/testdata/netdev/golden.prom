@@ -1,0 +1,65 @@
+# Weaker self-authored golden from captured Linux /proc/net/dev; not node_exporter e2e.
+# HELP node_network_receive_bytes_total Network device statistic receive_bytes.
+# TYPE node_network_receive_bytes_total counter
+node_network_receive_bytes_total{device="lo"} 1020
+node_network_receive_bytes_total{device="eth0"} 25689645
+# HELP node_network_receive_packets_total Network device statistic receive_packets.
+# TYPE node_network_receive_packets_total counter
+node_network_receive_packets_total{device="lo"} 12
+node_network_receive_packets_total{device="eth0"} 69427
+# HELP node_network_receive_errs_total Network device statistic receive_errs.
+# TYPE node_network_receive_errs_total counter
+node_network_receive_errs_total{device="lo"} 0
+node_network_receive_errs_total{device="eth0"} 0
+# HELP node_network_receive_drop_total Network device statistic receive_drop.
+# TYPE node_network_receive_drop_total counter
+node_network_receive_drop_total{device="lo"} 0
+node_network_receive_drop_total{device="eth0"} 0
+# HELP node_network_receive_fifo_total Network device statistic receive_fifo.
+# TYPE node_network_receive_fifo_total counter
+node_network_receive_fifo_total{device="lo"} 0
+node_network_receive_fifo_total{device="eth0"} 0
+# HELP node_network_receive_frame_total Network device statistic receive_frame.
+# TYPE node_network_receive_frame_total counter
+node_network_receive_frame_total{device="lo"} 0
+node_network_receive_frame_total{device="eth0"} 0
+# HELP node_network_receive_compressed_total Network device statistic receive_compressed.
+# TYPE node_network_receive_compressed_total counter
+node_network_receive_compressed_total{device="lo"} 0
+node_network_receive_compressed_total{device="eth0"} 0
+# HELP node_network_receive_multicast_total Network device statistic receive_multicast.
+# TYPE node_network_receive_multicast_total counter
+node_network_receive_multicast_total{device="lo"} 0
+node_network_receive_multicast_total{device="eth0"} 0
+# HELP node_network_transmit_bytes_total Network device statistic transmit_bytes.
+# TYPE node_network_transmit_bytes_total counter
+node_network_transmit_bytes_total{device="lo"} 1020
+node_network_transmit_bytes_total{device="eth0"} 433352
+# HELP node_network_transmit_packets_total Network device statistic transmit_packets.
+# TYPE node_network_transmit_packets_total counter
+node_network_transmit_packets_total{device="lo"} 12
+node_network_transmit_packets_total{device="eth0"} 4449
+# HELP node_network_transmit_errs_total Network device statistic transmit_errs.
+# TYPE node_network_transmit_errs_total counter
+node_network_transmit_errs_total{device="lo"} 0
+node_network_transmit_errs_total{device="eth0"} 0
+# HELP node_network_transmit_drop_total Network device statistic transmit_drop.
+# TYPE node_network_transmit_drop_total counter
+node_network_transmit_drop_total{device="lo"} 0
+node_network_transmit_drop_total{device="eth0"} 0
+# HELP node_network_transmit_fifo_total Network device statistic transmit_fifo.
+# TYPE node_network_transmit_fifo_total counter
+node_network_transmit_fifo_total{device="lo"} 0
+node_network_transmit_fifo_total{device="eth0"} 0
+# HELP node_network_transmit_colls_total Network device statistic transmit_colls.
+# TYPE node_network_transmit_colls_total counter
+node_network_transmit_colls_total{device="lo"} 0
+node_network_transmit_colls_total{device="eth0"} 0
+# HELP node_network_transmit_carrier_total Network device statistic transmit_carrier.
+# TYPE node_network_transmit_carrier_total counter
+node_network_transmit_carrier_total{device="lo"} 0
+node_network_transmit_carrier_total{device="eth0"} 0
+# HELP node_network_transmit_compressed_total Network device statistic transmit_compressed.
+# TYPE node_network_transmit_compressed_total counter
+node_network_transmit_compressed_total{device="lo"} 0
+node_network_transmit_compressed_total{device="eth0"} 0
