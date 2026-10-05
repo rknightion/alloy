@@ -409,9 +409,24 @@ func hasComposeFile(testDir string) bool {
 	panic(fmt.Sprintf("failed to stat compose file %q: %v", composeFile, err))
 }
 
-// runTest runs a single test, automatically detecting whether to use docker-compose
-// or testcontainers based on the presence of a docker-compose.yaml file.
+// runSSHTest invokes the isolated scenario, which owns its build and resources.
+// Both explicit filtering and default enumeration use this same safe runner.
+func runSSHTest(ctx context.Context, testDir string, testTimeout time.Duration) {
+	testCtx, cancel := context.WithTimeout(ctx, testTimeout)
+	defer cancel()
+	testCmd := exec.CommandContext(testCtx, "go", "test", "-v", "-count=1", "-tags=alloyintegrationtests", "-timeout="+testTimeout.String(), "./integration-tests/docker/tests/ssh-exporter")
+	testCmd.Dir = repoRootDir
+	output, err := testCmd.CombinedOutput()
+	addLog(TestLog{TestDir: filepath.Base(testDir), TestOutput: string(output), IsError: err != nil})
+}
+
+// runTest runs the isolated SSH scenario, or selects the existing docker-compose
+// or testcontainers runner for every other directory.
 func runTest(ctx context.Context, testDir string, port int, stateful bool, testTimeout time.Duration) {
+	if filepath.Base(filepath.Clean(testDir)) == "ssh-exporter" {
+		runSSHTest(ctx, testDir, testTimeout)
+		return
+	}
 	if hasComposeFile(testDir) {
 		runComposeTest(ctx, testDir, stateful, testTimeout)
 	} else {
