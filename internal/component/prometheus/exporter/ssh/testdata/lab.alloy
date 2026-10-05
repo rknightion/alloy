@@ -1,0 +1,29 @@
+local.file "ssh_key" {
+  filename  = "/Users/rob/repos/chat-personal/credentials/ssh/alloy-agentless-lab/id_ed25519"
+  is_secret = true
+}
+
+discovery.relabel "linux" {
+  targets = [{"__address__" = "alloy-ssh-ubuntu.rob-knight.net", "environment" = "lab"}]
+}
+
+prometheus.exporter.ssh "lab" {
+  known_hosts_files   = ["/Users/rob/repos/chat-personal/credentials/ssh/alloy-agentless-lab/known_hosts"]
+  targets            = discovery.relabel.linux.output
+  enabled_collectors = ["cpu", "loadavg", "meminfo", "stat", "uname"]
+
+  auth "default" {
+    username    = "alloyscrape"
+    private_key = local.file.ssh_key.content
+  }
+}
+
+prometheus.scrape "lab" {
+  targets         = prometheus.exporter.ssh.lab.targets
+  forward_to      = []
+  scrape_interval = "5s"
+
+  clustering {
+    enabled = true
+  }
+}
