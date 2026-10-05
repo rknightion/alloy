@@ -163,7 +163,7 @@ func failureDetails(farm []*targetServer) []string {
 	var details []string
 	for _, s := range farm[:min(5, len(farm))] {
 		s.mu.Lock()
-		details = append(details, s.lastFailure)
+		details = append(details, s.lastFailure+"; server_exec="+s.lastExecError)
 		s.mu.Unlock()
 	}
 	return details
@@ -281,7 +281,7 @@ func BenchmarkSSHScale(b *testing.B) {
 		emit(b, map[string]any{"kind": "round", "round": round, "start_offset_seconds": began.Sub(start).Seconds(),
 			"duration_seconds": time.Since(began).Seconds(), "successes": len(farm) - len(failures), "failures": len(failures)})
 		if len(failures) != 0 {
-			b.Fatalf("capacity limit: %d/%d baseline targets failed: %v", len(failures), len(farm), failureDetails(failures))
+			b.Errorf("capacity limit: %d/%d baseline targets failed: %v", len(failures), len(farm), failureDetails(failures))
 		}
 		sample := readResources("round_complete", farm, reg)
 		emit(b, sample)
