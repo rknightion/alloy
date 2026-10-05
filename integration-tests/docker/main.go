@@ -56,6 +56,16 @@ func runIntegrationTests(cmd *cobra.Command, args []string) {
 	repoRootDir = mustFindRepoRoot()
 	testsRootDir = filepath.Join(repoRootDir, "integration-tests", "docker")
 
+	// This scenario owns its build and isolated Docker resources. Dispatch before
+	// the shared environment so the explicit filter never touches other services.
+	if specificTest != "" && isSSHTestDir(resolveTestDir(specificTest)) {
+		runTest(ctx, resolveTestDir(specificTest), 12345, stateful, testTimeout)
+		if reportResults(true) > 0 {
+			log.Fatal("SSH integration scenario failed. See logs for failure")
+		}
+		return
+	}
+
 	if !skipBuild {
 		buildBaseAlloyImage()
 		buildAlloyImagesFromTestYAMLs()
