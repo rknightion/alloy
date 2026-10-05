@@ -1,11 +1,13 @@
 package collectors
 
 import (
-	"github.com/grafana/alloy/internal/agentless"
-	"github.com/grafana/alloy/internal/agentless/conformance"
-	"github.com/prometheus/client_golang/prometheus"
 	"strings"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/grafana/alloy/internal/agentless"
+	"github.com/grafana/alloy/internal/agentless/conformance"
 )
 
 func TestMeminfoConformance(t *testing.T) {
