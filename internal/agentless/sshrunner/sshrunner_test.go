@@ -39,12 +39,41 @@ type testServer struct {
 	dials     atomic.Int32
 	auths     atomic.Int32
 	sessions  atomic.Int32
+	channelID atomic.Int32
 	peak      atomic.Int32
 	commands  chan string
 	mute      bool
 	silent    atomic.Bool
 	stallExec atomic.Bool
 	authDelay atomic.Duration
+	trace     *authTrace
+	peerPause atomic.Duration
+	paused    atomic.Bool
+	probes    atomic.Int32
+}
+
+// authTrace records only lifecycle labels and elapsed times, never SSH payloads.
+// It is bounded even when a faulty peer repeatedly opens channels.
+type authTrace struct {
+	mu     sync.Mutex
+	start  time.Time
+	events []string
+}
+
+func (a *authTrace) record(event string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.events) < 200 {
+		a.events = append(a.events, fmt.Sprintf("%s %s", time.Since(a.start), event))
+	}
+}
+
+func (a *authTrace) dump(t *testing.T) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, event := range a.events {
+		t.Log(event)
+	}
 }
 
 func signer(t *testing.T) (ssh.Signer, ed25519.PrivateKey) {
@@ -60,7 +89,7 @@ func serve(t *testing.T, address string, host ssh.Signer, password string, userK
 	t.Helper()
 	l, err := net.Listen("tcp", address)
 	require.NoError(t, err)
-	s := &testServer{listener: l, conns: make(map[net.Conn]bool), commands: make(chan string, 50), mute: mute}
+	s := &testServer{listener: l, conns: make(map[net.Conn]bool), commands: make(chan string, 50), mute: mute, trace: &authTrace{start: time.Now()}}
 	s.config = &ssh.ServerConfig{
 		PasswordCallback: func(meta ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 			delay := s.authDelay.Load()
@@ -93,34 +122,47 @@ func serve(t *testing.T, address string, host ssh.Signer, password string, userK
 			if err != nil {
 				return
 			}
-			s.dials.Add(1)
+			id := s.dials.Add(1)
 			s.mu.Lock()
 			s.conns[c] = true
 			s.mu.Unlock()
 			s.wg.Add(1)
-			go s.connection(c)
+			go s.connection(c, id)
 		}
 	}()
 	t.Cleanup(s.stop)
 	return s
 }
 
-func (s *testServer) connection(raw net.Conn) {
+func (s *testServer) connection(raw net.Conn, id int32) {
+	record := func(event string) { s.trace.record(fmt.Sprintf("connection=%d %s", id, event)) }
+	record("server connection accepted")
+	defer record("server connection closed")
 	defer s.wg.Done()
 	defer func() { _ = raw.Close(); s.mu.Lock(); delete(s.conns, raw); s.mu.Unlock() }()
 	_ = raw.SetDeadline(time.Now().Add(5 * time.Second))
 	conn, channels, requests, err := ssh.NewServerConn(raw, s.config)
 	if err != nil {
+		record("server handshake failed")
 		return
 	}
+	record("server handshake authenticated")
 	_ = raw.SetDeadline(time.Time{})
 	defer conn.Close()
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		for r := range requests {
+			record("server global request received")
+			if s.paused.Load() {
+				if r.Type == "keepalive@openssh.com" {
+					s.probes.Add(1)
+				}
+				time.Sleep(s.peerPause.Load())
+			}
 			if !s.mute {
-				_ = r.Reply(false, nil)
+				err := r.Reply(false, nil)
+				record(fmt.Sprintf("server global reply failed=%t", err != nil))
 			}
 		}
 	}()
@@ -134,11 +176,16 @@ func (s *testServer) connection(raw net.Conn) {
 			return
 		}
 		s.wg.Add(1)
-		go s.session(c, reqs)
+		go s.session(c, reqs, id, s.channelID.Add(1))
 	}
 }
 
-func (s *testServer) session(c ssh.Channel, reqs <-chan *ssh.Request) {
+func (s *testServer) session(c ssh.Channel, reqs <-chan *ssh.Request, connectionID, channelID int32) {
+	record := func(event string) {
+		s.trace.record(fmt.Sprintf("connection=%d channel=%d %s", connectionID, channelID, event))
+	}
+	record("server session opened")
+	defer record("server session closed")
 	defer s.wg.Done()
 	defer c.Close()
 	n := s.sessions.Add(1)
@@ -164,24 +211,35 @@ func (s *testServer) session(c ssh.Channel, reqs <-chan *ssh.Request) {
 			}
 			return
 		}
-		_ = r.Reply(true, nil)
+		err := r.Reply(true, nil)
+		record(fmt.Sprintf("server exec accepted reply-failed=%t", err != nil))
 		if s.silent.Load() {
 			_, _ = io.Copy(io.Discard, c)
 			for range reqs {
 			}
 			return
 		}
+		if pause := s.peerPause.Load(); pause > 0 {
+			s.paused.Store(true)
+			record("server scheduling pause starting")
+			time.Sleep(pause)
+			record("server scheduling pause ended")
+			s.paused.Store(false)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		cmd := exec.CommandContext(ctx, "sh", "-s")
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = c, c, io.Discard
 		cmd.WaitDelay = 100 * time.Millisecond
-		err := cmd.Run()
+		record("server command starting")
+		err = cmd.Run()
+		record(fmt.Sprintf("server command ended failed=%t deadline=%t", err != nil, ctx.Err() != nil))
 		cancel()
 		status := uint32(0)
 		if err != nil {
 			status = 1
 		}
-		_, _ = c.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
+		_, err = c.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
+		record(fmt.Sprintf("server exit-status sent failed=%t", err != nil))
 		return
 	}
 }
@@ -245,12 +303,38 @@ func TestBatchAndUnchangedUpdate(t *testing.T) {
 }
 
 func TestAuthSelection(t *testing.T) {
+	testAuthSelection(t, 0)
+}
+
+func TestAuthSelectionPeerScheduling(t *testing.T) {
+	// A peer scheduling stall after accepting exec is not an auth failure.
+	// 200ms is inside the unchanged 1s batch and 2s helper deadlines, but
+	// exceeds the shared fast-liveness fixture's 50ms probe deadline.
+	testAuthSelection(t, 200*time.Millisecond)
+}
+
+func testAuthSelection(t *testing.T, pause time.Duration) {
 	host, _ := signer(t)
 	user, key := signer(t)
 	s := serve(t, "127.0.0.1:0", host, "test-password", user.PublicKey(), false)
+	s.peerPause.Store(pause)
+	t.Cleanup(func() {
+		s.stop()
+		s.trace.dump(t)
+	})
 	for _, encrypted := range []bool{false, true} {
 		t.Run(fmt.Sprint(encrypted), func(t *testing.T) {
 			cfg := configFor(t, s, host.PublicKey())
+			// Authentication tests must use the product's liveness policy, not
+			// the accelerated half-open/idle fixture. Keep batch, dial and
+			// helper deadlines unchanged; dedicated liveness tests stay fast.
+			cfg.KeepaliveInterval = DefaultConfig.KeepaliveInterval
+			cfg.KeepaliveTimeout = DefaultConfig.KeepaliveTimeout
+			if pause > 0 {
+				// Accelerate only probe dispatch in the regression, so it must
+				// exercise a probe during the stall with the product reply budget.
+				cfg.KeepaliveInterval = 50 * time.Millisecond
+			}
 			var block *pem.Block
 			var err error
 			if encrypted {
@@ -265,11 +349,15 @@ func TestAuthSelection(t *testing.T) {
 			}
 			cfg.Auths["key"] = auth
 			p := newPool(t, cfg)
+			s.trace.record("client auth run starting")
 			results, err := p.Run(context.Background(), agentless.Target{Address: s.listener.Addr().String(), Auth: "key"}, []agentless.Read{agentless.CommandRead("printf", "key")})
 			require.NoError(t, err)
 			require.Equal(t, "key", string(results[0].Output))
 			run(t, p, s.listener.Addr().String())
 		})
+	}
+	if pause > 0 {
+		require.Positive(t, s.probes.Load(), "regression must probe during the active exec stall")
 	}
 }
 
