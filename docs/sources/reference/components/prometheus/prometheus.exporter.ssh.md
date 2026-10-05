@@ -148,8 +148,8 @@ The defaults exclude pseudo filesystems and common runtime mounts.
 | `fs_types_exclude` | `string` | Exclude matching filesystem types. | See below. | no |
 | `mount_points_exclude` | `string` | Exclude matching mount paths. | See below. | no |
 
-The default `fs_types_exclude` expression is `^(autofs\|binfmt_misc\|bpf\|cgroup2?\|configfs\|debugfs\|devpts\|devtmpfs\|fusectl\|hugetlbfs\|iso9660\|mqueue\|nsfs\|overlay\|proc\|procfs\|pstore\|rpc_pipefs\|securityfs\|selinuxfs\|squashfs\|sysfs\|tracefs)$`.
-The default `mount_points_exclude` expression is `^/(dev\|proc\|run/credentials/.+\|sys\|var/lib/docker/.+\|var/lib/containers/storage/.+)($\|/)`.
+The default `fs_types_exclude` expression is `^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$`.
+The default `mount_points_exclude` expression is `^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+|var/lib/containers/storage/.+)($|/)`.
 Set either expression to `""` to disable that filter.
 
 ### `netdev`
