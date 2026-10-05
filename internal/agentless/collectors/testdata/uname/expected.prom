@@ -1,0 +1,3 @@
+# HELP node_uname_info Labeled system information as provided by the uname system call.
+# TYPE node_uname_info gauge
+node_uname_info{domainname="(none)",machine="x86_64",nodename="alloy-ssh-ubuntu",release="7.0.14-17-pve",sysname="Linux",version="#1 SMP PREEMPT_DYNAMIC PMX 7.0.14-17 (2026-09-10T10:16Z)"} 1
