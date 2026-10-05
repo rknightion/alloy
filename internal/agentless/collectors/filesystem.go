@@ -208,7 +208,6 @@ func filesystemDF(in agentless.Input, read agentless.Read, mounts map[filesystem
 			}
 			out[key] = filesystemUsage{values[0], values[1], values[2]}
 		}
-
 	}
 	return out, nil
 }
