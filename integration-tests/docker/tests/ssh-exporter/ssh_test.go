@@ -40,7 +40,7 @@ func TestOpenSSH(t *testing.T) {
 	}
 	cmd := exec.CommandContext(ctx, "go", "build", "-tags=gore2regex", "-o", binary, ".")
 	cmd.Dir = filepath.Join(root, "collector")
-	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=go1.26.7", "GOOS=linux", "GOARCH="+runtime.GOARCH, "CGO_ENABLED=0")
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+runtime.GOARCH, "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build Linux Alloy: %v\n%s", err, out)
 	}
