@@ -409,6 +409,13 @@ func hasComposeFile(testDir string) bool {
 	panic(fmt.Sprintf("failed to stat compose file %q: %v", composeFile, err))
 }
 
+// isSSHTestDir recognizes only the repository's isolated SSH scenario, including
+// equivalent relative and absolute filter spellings, not unrelated basenames.
+func isSSHTestDir(testDir string) bool {
+	abs, err := filepath.Abs(testDir)
+	return err == nil && abs == filepath.Join(repoRootDir, "integration-tests", "docker", "tests", "ssh-exporter")
+}
+
 // runSSHTest invokes the isolated scenario, which owns its build and resources.
 // Both explicit filtering and default enumeration use this same safe runner.
 func runSSHTest(ctx context.Context, testDir string, testTimeout time.Duration) {
@@ -423,7 +430,7 @@ func runSSHTest(ctx context.Context, testDir string, testTimeout time.Duration) 
 // runTest runs the isolated SSH scenario, or selects the existing docker-compose
 // or testcontainers runner for every other directory.
 func runTest(ctx context.Context, testDir string, port int, stateful bool, testTimeout time.Duration) {
-	if filepath.Base(filepath.Clean(testDir)) == "ssh-exporter" {
+	if isSSHTestDir(testDir) {
 		runSSHTest(ctx, testDir, testTimeout)
 		return
 	}

@@ -58,7 +58,7 @@ func runIntegrationTests(cmd *cobra.Command, args []string) {
 
 	// This scenario owns its build and isolated Docker resources. Dispatch before
 	// the shared environment so the explicit filter never touches other services.
-	if specificTest == "ssh-exporter" {
+	if specificTest != "" && isSSHTestDir(resolveTestDir(specificTest)) {
 		runTest(ctx, resolveTestDir(specificTest), 12345, stateful, testTimeout)
 		if reportResults(true) > 0 {
 			log.Fatal("SSH integration scenario failed. See logs for failure")

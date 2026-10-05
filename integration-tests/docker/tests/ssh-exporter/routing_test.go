@@ -26,13 +26,44 @@ func TestDefaultDispatch(t *testing.T) {
 	var functions bytes.Buffer
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if ok && (fn.Name.Name == "runTest" || fn.Name.Name == "runSSHTest") {
+		if ok && (fn.Name.Name == "runTest" || fn.Name.Name == "runSSHTest" || fn.Name.Name == "isSSHTestDir") {
 			if err := printer.Fprint(&functions, fset, fn); err != nil {
 				t.Fatal(err)
 			}
 			functions.WriteByte('\n')
 		}
 	}
+	mainFile, err := parser.ParseFile(fset, "../../main.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var earlyCondition bytes.Buffer
+	for _, decl := range mainFile.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if fn.Name.Name == "resolveTestDir" {
+			if err := printer.Fprint(&functions, fset, fn); err != nil {
+				t.Fatal(err)
+			}
+			functions.WriteByte('\n')
+		}
+		if fn.Name.Name == "runIntegrationTests" {
+			for _, stmt := range fn.Body.List {
+				if branch, ok := stmt.(*ast.IfStmt); ok {
+					if err := printer.Fprint(&earlyCondition, fset, branch.Cond); err != nil {
+						t.Fatal(err)
+					}
+					break
+				}
+			}
+		}
+	}
+	if earlyCondition.Len() == 0 {
+		t.Fatal("missing early dispatch condition")
+	}
+	functions.WriteString("func earlyDispatch(specificTest string) bool { return " + earlyCondition.String() + " }\n")
 	dir := t.TempDir()
 	source := `package main
 import (
@@ -49,7 +80,7 @@ import (
 var _ = fmt.Sprintf
 var _ = exec.CommandContext
 var _ = filepath.Base
-var repoRootDir string
+var repoRootDir, testsRootDir string
 var selected string
 var logs []TestLog
 type TestLog struct { TestDir string; IsError bool; AlloyLog, TestOutput string }
@@ -60,6 +91,13 @@ func runTestWithTestcontainers(context.Context, string, int, bool, time.Duration
 ` + functions.String() + `
 func TestSelection(t *testing.T) {
  repoRootDir = t.TempDir()
+ testsRootDir = filepath.Join(repoRootDir, "integration-tests/docker")
+ for _, filter := range []string{"ssh-exporter", "./tests/ssh-exporter", filepath.Join(testsRootDir, "tests/ssh-exporter")} {
+  if !earlyDispatch(filter) { t.Fatalf("SSH filter %q enters shared setup", filter) }
+ }
+ if earlyDispatch("") || earlyDispatch("ordinary-case") || earlyDispatch(filepath.Join(t.TempDir(), "ssh-exporter")) {
+  t.Fatal("non-SSH filter changed early route")
+ }
  fakeBin := t.TempDir()
  record := filepath.Join(t.TempDir(), "record")
  fake := "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\" > \"$DISPATCH_RECORD\"\n"
@@ -74,6 +112,8 @@ func TestSelection(t *testing.T) {
   if !strings.Contains(string(out), want+"\n") { t.Fatalf("missing argument %q: %s", want, out) }
  }
  if len(logs) != 1 || logs[0].IsError || logs[0].TestDir != "ssh-exporter" { t.Fatalf("unexpected result: %+v", logs) }
+ runTest(context.Background(), filepath.Join(t.TempDir(), "ssh-exporter"), 12345, false, time.Minute)
+ if selected != "legacy" { t.Fatalf("unrelated same-basename scenario changed route: %s", selected) }
  runTest(context.Background(), "ordinary-case", 12345, false, time.Minute)
  if selected != "legacy" { t.Fatalf("ordinary scenario changed route: %s", selected) }
  runTest(context.Background(), "compose-case", 12345, false, time.Minute)
