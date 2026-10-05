@@ -3,6 +3,8 @@ package exporter_test
 import (
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +40,7 @@ import (
 	"github.com/grafana/alloy/internal/component/prometheus/exporter/snmp"
 	"github.com/grafana/alloy/internal/component/prometheus/exporter/snowflake"
 	"github.com/grafana/alloy/internal/component/prometheus/exporter/squid"
+	"github.com/grafana/alloy/internal/component/prometheus/exporter/ssh"
 	"github.com/grafana/alloy/internal/component/prometheus/exporter/static"
 	"github.com/grafana/alloy/internal/component/prometheus/exporter/statsd"
 	"github.com/grafana/alloy/internal/component/prometheus/exporter/unix"
@@ -57,6 +60,13 @@ type testConfig struct {
 }
 
 func TestInstanceKey(t *testing.T) {
+	knownHosts := filepath.Join(t.TempDir(), "known_hosts")
+	require.NoError(t, os.WriteFile(knownHosts, nil, 0600))
+	var sshArgs ssh.Arguments
+	sshArgs.SetToDefault()
+	sshArgs.KnownHostsFiles = []string{knownHosts}
+	sshArgs.Auths = []ssh.Auth{{Name: "default", Username: "reader", Password: "synthetic"}}
+	sshArgs.Targets = []ssh.Target{{Name: "host", Address: "linux.example:22"}}
 	tests := []testConfig{
 		{
 			testName:              "agent / self",
@@ -391,6 +401,13 @@ func TestInstanceKey(t *testing.T) {
 				SquidAddr: "host01:3128",
 			},
 			expectedInstanceLabel: "host01:3128",
+		},
+		{
+			testName:              "ssh",
+			componentName:         "prometheus.exporter.ssh",
+			args:                  sshArgs,
+			temporaryHostname:     "test-agent",
+			expectedInstanceLabel: "linux.example:22",
 		},
 		{
 			testName:      "statsd",

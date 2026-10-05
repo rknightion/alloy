@@ -115,6 +115,7 @@ The following components, grouped by namespace, _export_ Targets.
 - [`prometheus.exporter.snmp`](../components/prometheus/prometheus.exporter.snmp)
 - [`prometheus.exporter.snowflake`](../components/prometheus/prometheus.exporter.snowflake)
 - [`prometheus.exporter.squid`](../components/prometheus/prometheus.exporter.squid)
+- [`prometheus.exporter.ssh`](../components/prometheus/prometheus.exporter.ssh)
 - [`prometheus.exporter.static`](../components/prometheus/prometheus.exporter.static)
 - [`prometheus.exporter.statsd`](../components/prometheus/prometheus.exporter.statsd)
 - [`prometheus.exporter.unix`](../components/prometheus/prometheus.exporter.unix)
@@ -158,6 +159,7 @@ The following components, grouped by namespace, _consume_ Targets.
 
 {{< collapse title="prometheus" >}}
 - [`prometheus.enrich`](../components/prometheus/prometheus.enrich)
+- [`prometheus.exporter.ssh`](../components/prometheus/prometheus.exporter.ssh)
 - [`prometheus.scrape`](../components/prometheus/prometheus.scrape)
 {{< /collapse >}}
 
