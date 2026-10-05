@@ -148,6 +148,6 @@ func (updateCollector) Describe(chan<- *prometheus.Desc) {}
 
 func (c updateCollector) Collect(ch chan<- prometheus.Metric) {
 	if err := c.collector.Update(c.target, c.input, ch); err != nil {
-		ch <- prometheus.NewInvalidMetric(prometheus.NewDesc("conformance_update_error", "Update failed.", nil, nil), fmt.Errorf("Update: %w", err))
+		ch <- prometheus.NewInvalidMetric(prometheus.NewDesc("conformance_update_error", "Update failed.", nil, nil), fmt.Errorf("update: %w", err))
 	}
 }
