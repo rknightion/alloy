@@ -234,7 +234,6 @@ Use Prometheus `up` and `scrape_duration_seconds` for failed scrapes, and the po
 This example reads a private key from a secret file and uses DNS discovery for Linux SSH hosts.
 Run Alloy with experimental components enabled and clustering configured before enabling clustered scraping:
 
-
 ```alloy
 local.file "ssh_key" {
 	filename  = "<PRIVATE_KEY_FILE>"
@@ -304,7 +303,6 @@ local.file "vault_token" {
 remote.vault "ssh_key" {
 	server = "<VAULT_SERVER_URL>"
 	path   = "<VAULT_KV_PATH>"
-	key    = "private_key"
 
 	auth.token {
 		token = local.file.vault_token.content
@@ -312,7 +310,7 @@ remote.vault "ssh_key" {
 }
 ```
 
-Replace _`<VAULT_TOKEN_FILE>`_ with your protected token file, _`<VAULT_SERVER_URL>`_ with your Vault URL, and _`<VAULT_KV_PATH>`_ with the KV v2 secret path containing a `private_key` field.
+Replace _`<VAULT_TOKEN_FILE>`_ with your protected token file, _`<VAULT_SERVER_URL>`_ with your Vault URL, and _`<VAULT_KV_PATH>`_ with the KV v2 mount and secret path in `<MOUNT>/<SECRET_PATH>` form, containing a `private_key` field.
 Set the exporter's `auth` block's `private_key` argument to `remote.vault.ssh_key.data["private_key"]`.
 
 For operational setup, refer to [Harden SSH metrics collection](../../../../configure/ssh-metrics-hardening/), [`prometheus.scrape`](../prometheus.scrape/), and [`remote.vault`](../../remote/remote.vault/).
