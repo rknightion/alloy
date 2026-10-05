@@ -15,10 +15,10 @@ package conformance
 import (
 	"bytes"
 	"context"
+	"embed"
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/grafana/alloy/internal/agentless"
@@ -29,6 +29,12 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 )
+
+// Embedding keeps defaults available to external collector tests even when
+// source paths are removed by -trimpath or the working directory changes.
+//
+//go:embed testdata/node_exporter
+var fixtures embed.FS
 
 // Case describes one conformance check.
 type Case struct {
@@ -66,20 +72,25 @@ func Check(t testing.TB, c Case) {
 		}
 		owned[name] = true
 	}
-	// Resolve defaults relative to this package, not the calling collector's
-	// working directory. Explicit paths remain relative to the caller.
-	_, source, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("conformance: cannot locate vendored fixtures")
-	}
-	fixtures := filepath.Join(filepath.Dir(source), "testdata", "node_exporter")
+	// Materialize the embedded root for FromFS. Explicit paths remain relative
+	// to the caller, and the default oracle does not depend on a custom root.
 	if c.Root == "" {
-		c.Root = fixtures
+		root, err := fs.Sub(fixtures, "testdata/node_exporter")
+		if err != nil {
+			t.Fatalf("conformance: open vendored fixtures: %v", err)
+		}
+		c.Root = t.TempDir()
+		if err := os.CopyFS(c.Root, root); err != nil {
+			t.Fatalf("conformance: copy vendored fixtures: %v", err)
+		}
 	}
+	var expected []byte
+	var err error
 	if c.Expected == "" {
-		c.Expected = filepath.Join(fixtures, "e2e-output.txt")
+		expected, err = fixtures.ReadFile("testdata/node_exporter/e2e-output.txt")
+	} else {
+		expected, err = os.ReadFile(c.Expected)
 	}
-	expected, err := os.ReadFile(c.Expected)
 	if err != nil {
 		t.Fatalf("conformance: read expected output: %v", err)
 	}

@@ -1,4 +1,4 @@
-package conformance
+package conformance_test
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/grafana/alloy/internal/agentless"
+	"github.com/grafana/alloy/internal/agentless/conformance"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
@@ -68,10 +69,15 @@ func (c loadCollector) Update(_ agentless.Target, in agentless.Input, ch chan<- 
 	}
 	return nil
 }
-func loadCase(fault string) Case {
-	return Case{Collector: loadCollector{fault: fault, read: agentless.FileRead("/proc/loadavg")}, Families: []string{"node_load1", "node_load5", "node_load15"}}
+func loadCase(fault string) conformance.Case {
+	return conformance.Case{Collector: loadCollector{fault: fault, read: agentless.FileRead("/proc/loadavg")}, Families: []string{"node_load1", "node_load5", "node_load15"}}
 }
-func TestCheckFixtures(t *testing.T) { Check(t, loadCase("")) }
+
+func TestCheckFixtures(t *testing.T) {
+	// External collector callers must not need source paths or a repository cwd.
+	t.Chdir(t.TempDir())
+	conformance.Check(t, loadCase(""))
+}
 
 func TestCheckCommandAndCustomOracle(t *testing.T) {
 	dir := t.TempDir()
@@ -82,10 +88,11 @@ func TestCheckCommandAndCustomOracle(t *testing.T) {
 	read := agentless.CommandRead("uptime")
 	c := loadCase("")
 	c.Collector = loadCollector{read: read}
-	c.Commands = map[string]string{read.ID: input}
-	c.Expected = expected
-	c.Root = dir
-	Check(t, c)
+	t.Chdir(dir)
+	c.Commands = map[string]string{read.ID: "command"}
+	c.Expected = "expected"
+	c.Root = "."
+	conformance.Check(t, c)
 }
 
 // A real testing.TB cannot be faked (it has private methods). Subprocesses
@@ -104,6 +111,11 @@ func TestCheckRejectsBadCollectors(t *testing.T) {
 			require.Contains(t, string(out), "--- FAIL: TestCheckProcess")
 			require.NotContains(t, string(out), "not implemented", "stub failure is not conformance evidence")
 			require.Contains(t, string(out), "conformance:")
+			if fault == "value" {
+				require.Contains(t, string(out), "conformance: metrics differ:")
+				require.Contains(t, string(out), "-node_load1 1.21")
+				require.Contains(t, string(out), "+node_load1 0.21")
+			}
 		})
 	}
 }
@@ -126,7 +138,7 @@ func TestCheckProcess(t *testing.T) {
 		c.Expected = filepath.Join(t.TempDir(), "expected")
 		require.NoError(t, os.WriteFile(c.Expected, []byte("malformed{\n"), 0600))
 	}
-	Check(t, c)
+	conformance.Check(t, c)
 }
 
 func TestFixturePin(t *testing.T) {
