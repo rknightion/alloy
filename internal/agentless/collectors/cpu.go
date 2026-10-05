@@ -10,8 +10,10 @@ import (
 	"github.com/grafana/alloy/internal/agentless"
 )
 
+const cpuSubsystem = "cpu"
+
 func init() {
-	Register(Registration{Name: "cpu", OS: "linux", DefaultEnabled: true, Factory: newCPUCollector})
+	Register(Registration{Name: cpuSubsystem, OS: "linux", DefaultEnabled: true, Factory: newCPUCollector})
 }
 
 type cpuCollector struct {
@@ -24,7 +26,7 @@ func newCPUCollector(_ Configs, _ *slog.Logger) (agentless.Collector, error) {
 }
 
 // Name implements agentless.Collector.
-func (c *cpuCollector) Name() string { return "cpu" }
+func (c *cpuCollector) Name() string { return cpuSubsystem }
 
 // Reads implements agentless.Collector.
 func (c *cpuCollector) Reads() []agentless.Read {
@@ -32,8 +34,8 @@ func (c *cpuCollector) Reads() []agentless.Read {
 }
 
 var (
-	cpuSecondsDesc      = prometheus.NewDesc(prometheus.BuildFQName(agentless.Namespace, "cpu", "seconds_total"), "Seconds the CPUs spent in each mode.", []string{"cpu", "mode"}, nil)
-	cpuGuestSecondsDesc = prometheus.NewDesc(prometheus.BuildFQName(agentless.Namespace, "cpu", "guest_seconds_total"), "Seconds the CPUs spent in guests (VMs) for each mode.", []string{"cpu", "mode"}, nil)
+	cpuSecondsDesc      = prometheus.NewDesc(prometheus.BuildFQName(agentless.Namespace, cpuSubsystem, "seconds_total"), "Seconds the CPUs spent in each mode.", []string{cpuSubsystem, "mode"}, nil)
+	cpuGuestSecondsDesc = prometheus.NewDesc(prometheus.BuildFQName(agentless.Namespace, cpuSubsystem, "guest_seconds_total"), "Seconds the CPUs spent in guests (VMs) for each mode.", []string{cpuSubsystem, "mode"}, nil)
 )
 
 // Update implements agentless.Collector.
