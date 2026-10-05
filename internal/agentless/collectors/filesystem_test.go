@@ -2,7 +2,9 @@ package collectors
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,7 +22,7 @@ var filesystemFamilies = []string{"node_filesystem_size_bytes", "node_filesystem
 func filesystemInput(t *testing.T, c agentless.Collector, flavor string) agentless.Input {
 	t.Helper()
 	root := filepath.Join("testdata", "filesystem", flavor)
-	runner, err := agentlesstest.FromFS(root, map[string]string{agentless.CommandRead("df", "-akPT").ID: filepath.Join(root, "blocks"), agentless.CommandRead("df", "-aiPT").ID: filepath.Join(root, "inodes")}, c.Reads())
+	runner, err := agentlesstest.FromFS(root, map[string]string{agentless.CommandRead("env", "LC_ALL=C", "df", "-akPT").ID: filepath.Join(root, "blocks"), agentless.CommandRead("env", "LC_ALL=C", "df", "-aiPT").ID: filepath.Join(root, "inodes")}, c.Reads())
 	require.NoError(t, err)
 	results, err := runner.Run(context.Background(), agentless.Target{}, c.Reads())
 	require.NoError(t, err)
@@ -55,7 +57,7 @@ func TestFilesystemRealOutput(t *testing.T) {
 			c, err := newFilesystemCollector(DefaultConfigs(), nil)
 			require.NoError(t, err)
 			root := filepath.Join("testdata", "filesystem", flavor)
-			conformance.Check(t, conformance.Case{Collector: c, Families: filesystemFamilies, Root: root, Commands: map[string]string{agentless.CommandRead("df", "-akPT").ID: filepath.Join(root, "blocks"), agentless.CommandRead("df", "-aiPT").ID: filepath.Join(root, "inodes")}, Expected: filepath.Join(root, "expected.prom")})
+			conformance.Check(t, conformance.Case{Collector: c, Families: filesystemFamilies, Root: root, Commands: map[string]string{agentless.CommandRead("env", "LC_ALL=C", "df", "-akPT").ID: filepath.Join(root, "blocks"), agentless.CommandRead("env", "LC_ALL=C", "df", "-aiPT").ID: filepath.Join(root, "inodes")}, Expected: filepath.Join(root, "expected.prom")})
 			in := filesystemInput(t, c, flavor)
 			for _, read := range c.Reads()[:2] {
 				r := in[read.ID]
@@ -68,6 +70,35 @@ func TestFilesystemRealOutput(t *testing.T) {
 				require.Zero(t, m.GetGauge().GetValue())
 			}
 		})
+	}
+}
+
+// These outputs and statuses were observed from GNU df with one readable and
+// one missing operand, rather than assigning exit 1 to a successful recording.
+func TestFilesystemRecordedGNUExitOne(t *testing.T) {
+	c, err := newFilesystemCollector(DefaultConfigs(), nil)
+	require.NoError(t, err)
+	in := filesystemInput(t, c, "gnu-exit1")
+	data, err := os.ReadFile(filepath.Join("testdata", "filesystem", "gnu-exit1", "exits.json"))
+	require.NoError(t, err)
+	var exits map[string]int
+	require.NoError(t, json.Unmarshal(data, &exits))
+	for j, name := range []string{"blocks", "inodes"} {
+		require.Equal(t, 1, exits[name])
+		read := c.Reads()[j]
+		result := in[read.ID]
+		result.ExitStatus = exits[name]
+		in[read.ID] = result
+	}
+	metrics := filesystemMetrics(t, c, in)
+	require.Len(t, metrics["node_filesystem_size_bytes"], 1)
+	require.Positive(t, metrics["node_filesystem_size_bytes"][0].GetGauge().GetValue())
+	for _, metric := range metrics["node_filesystem_device_error"] {
+		for _, label := range metric.Label {
+			if label.GetName() == "mountpoint" && label.GetValue() == "/" {
+				require.Zero(t, metric.GetGauge().GetValue())
+			}
+		}
 	}
 }
 
@@ -171,7 +202,7 @@ func filesystemProofInput(t *testing.T, c agentless.Collector, flavor string, sp
 	root := filepath.Join("testdata", "filesystem", flavor)
 	for j, read := range c.Reads()[:2] {
 		file := []string{"blocks", "inodes"}[j]
-		if !strings.Contains(read.Argv[1], "a") {
+		if !strings.Contains(read.Argv[len(read.Argv)-1], "a") {
 			file = "legacy-" + file
 		}
 		data, err := os.ReadFile(filepath.Join(root, file))
@@ -196,6 +227,60 @@ func filesystemProofInput(t *testing.T, c agentless.Collector, flavor string, sp
 	}
 	in[read.ID] = agentless.Result{Read: read, Output: []byte(mounts)}
 	return in
+}
+
+// The fake df is the subprocess edge: it localizes its header unless the
+// actual compiled read normalizes the inherited remote environment.
+func TestFilesystemInheritedLocale(t *testing.T) {
+	c, err := newFilesystemCollector(Configs{}, nil)
+	require.NoError(t, err)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "df"), []byte(`#!/bin/sh
+if [ "$LC_ALL" = C ]; then
+  printf 'Filesystem Type Blocks Used Available Capacity Mounted on\n'
+else
+  printf 'Système de fichiers Type Blocs Utilisé Disponible Uti%% Monté sur\n'
+fi
+printf '/dev/a ext4 10 3 5 50%% /proof\n'
+`), 0o700))
+	in := agentless.Input{}
+	for _, read := range c.Reads()[:2] {
+		cmd := exec.Command("sh", "-c", strings.Join(read.Argv, " "))
+		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "LC_ALL=fr_FR.UTF-8")
+		output, err := cmd.Output()
+		require.NoError(t, err)
+		in[read.ID] = agentless.Result{Read: read, Output: output}
+	}
+	read := c.Reads()[2]
+	in[read.ID] = agentless.Result{Read: read, Output: []byte("/dev/a /proof ext4 rw 0 0\n")}
+	metrics := filesystemMetrics(t, c, in)
+	require.Equal(t, float64(10240), metrics["node_filesystem_size_bytes"][0].GetGauge().GetValue())
+	require.Equal(t, float64(10), metrics["node_filesystem_files"][0].GetGauge().GetValue())
+}
+
+func TestFilesystemEndpointWhitespace(t *testing.T) {
+	c, err := newFilesystemCollector(Configs{}, nil)
+	require.NoError(t, err)
+	for _, endpoints := range []struct{ device, mount string }{
+		{" leading source", "/proof"},
+		{"source", "/proof trailing "},
+	} {
+		in := agentless.Input{}
+		for _, read := range c.Reads()[:2] {
+			in[read.ID] = agentless.Result{Read: read, Output: []byte("Filesystem Type Blocks Used Available Capacity Mounted on\n" + endpoints.device + " ext4 10 3 5 50% " + endpoints.mount + "\n")}
+		}
+		read := c.Reads()[2]
+		in[read.ID] = agentless.Result{Read: read, Output: []byte(strings.ReplaceAll(endpoints.device, " ", `\040`) + " " + strings.ReplaceAll(endpoints.mount, " ", `\040`) + " ext4 rw 0 0\n")}
+		metrics := filesystemMetrics(t, c, in)
+		require.Len(t, metrics["node_filesystem_size_bytes"], 1)
+		require.Equal(t, float64(10240), metrics["node_filesystem_size_bytes"][0].GetGauge().GetValue())
+		labels := map[string]string{}
+		for _, label := range metrics["node_filesystem_size_bytes"][0].Label {
+			labels[label.GetName()] = label.GetValue()
+		}
+		require.Equal(t, endpoints.device, labels["device"])
+		require.Equal(t, endpoints.mount, labels["mountpoint"])
+	}
 }
 
 func TestFilesystemDefaults(t *testing.T) {

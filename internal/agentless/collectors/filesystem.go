@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -69,8 +70,9 @@ func (c *filesystemCollector) Name() string { return "filesystem" }
 
 // Reads implements agentless.Collector.
 func (c *filesystemCollector) Reads() []agentless.Read {
-	// -a includes duplicate/bind mounts which GNU df otherwise suppresses.
-	return []agentless.Read{agentless.CommandRead("df", "-akPT"), agentless.CommandRead("df", "-aiPT"), agentless.FileRead("/proc/self/mounts")}
+	// Normalize df's localized header; -a includes duplicate/bind mounts.
+	// Every argument is compiled in, including the environment assignment.
+	return []agentless.Read{agentless.CommandRead("env", "LC_ALL=C", "df", "-akPT"), agentless.CommandRead("env", "LC_ALL=C", "df", "-aiPT"), agentless.FileRead("/proc/self/mounts")}
 }
 
 // Update implements agentless.Collector.
@@ -147,7 +149,9 @@ func filesystemDF(in agentless.Input, read agentless.Read, mounts map[filesystem
 	if !ok || result.NotExist || result.Truncated || result.TimedOut || result.ExitStatus < 0 || result.ExitStatus > 1 {
 		return nil, fmt.Errorf("filesystem read %q unavailable", read.ID)
 	}
-	lines := strings.Split(strings.TrimSpace(string(result.Output)), "\n")
+	inodeRead := slices.Contains(read.Argv, "-aiPT")
+	// Preserve endpoint whitespace, including the final mount's trailing space.
+	lines := strings.Split(string(result.Output), "\n")
 	if len(lines) == 0 || !strings.HasPrefix(strings.TrimSpace(lines[0]), "Filesystem") {
 		return nil, fmt.Errorf("filesystem read %q has no df header", read.ID)
 	}
@@ -159,7 +163,7 @@ func filesystemDF(in agentless.Input, read agentless.Read, mounts map[filesystem
 		for key := range mounts {
 			// Match exact endpoints, leaving padding for Fields to remove. Do
 			// not decode df text: unlike proc mounts it contains literal names.
-			row := strings.TrimLeft(line, " \t")
+			row := line
 			if !strings.HasPrefix(row, key.device) || !strings.HasSuffix(row, key.mount) {
 				continue
 			}
@@ -180,12 +184,12 @@ func filesystemDF(in agentless.Input, read agentless.Read, mounts map[filesystem
 			}
 			// GNU -a prints '-' for inaccessible/shadowed mounts. Leaving
 			// the row absent reports device_error, not fictitious zero space.
-			if f[0] == "-" || f[1] == "-" && !strings.Contains(read.Argv[1], "i") {
+			if f[0] == "-" || f[1] == "-" && !inodeRead {
 				continue
 			}
 			var values [3]float64
 			for j := range values {
-				if f[j+1] == "-" && strings.Contains(read.Argv[1], "i") {
+				if f[j+1] == "-" && inodeRead {
 					continue
 				}
 				if j == 2 {
