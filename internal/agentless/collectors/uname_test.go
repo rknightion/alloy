@@ -1,11 +1,12 @@
 package collectors
 
 import (
+	"testing"
+
 	"github.com/grafana/alloy/internal/agentless"
 	"github.com/grafana/alloy/internal/agentless/conformance"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 // This is a weaker, self-authored golden from real Linux SSH output, not a
