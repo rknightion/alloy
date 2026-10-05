@@ -6,10 +6,12 @@ import (
 	"crypto/rand"
 	"io"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,9 +28,25 @@ import (
 	"github.com/grafana/alloy/internal/util"
 )
 
+type stalledResponseWriter struct {
+	header  http.Header
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (w *stalledResponseWriter) Header() http.Header { return w.header }
+func (w *stalledResponseWriter) WriteHeader(int)     {}
+func (w *stalledResponseWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.started) })
+	<-w.release
+	return len(p), nil
+}
+
 // This bounded loopback SSH server executes only the compiled batch via stdin.
 // It uses generated host keys and a synthetic password, never lab credentials.
 func TestPoolSurvivesUpdate(t *testing.T) {
+	procStat := filepath.Join(t.TempDir(), "stat")
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	host, err := gossh.NewSignerFromKey(key)
@@ -81,12 +99,19 @@ func TestPoolSurvivesUpdate(t *testing.T) {
 							}
 							_ = req.Reply(true, nil)
 							ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+							script, err := io.ReadAll(ch)
+							if err != nil {
+								cancel()
+								return
+							}
 							cmd := exec.CommandContext(ctx, "sh", "-s")
-							cmd.Stdin = ch
+							// Supply Linux proc data at the server/process edge on
+							// any host, retaining the real SSH batch protocol.
+							cmd.Stdin = strings.NewReader(strings.ReplaceAll(string(script), "/proc/stat", procStat))
 							cmd.Stdout = ch
 							cmd.Stderr = io.Discard
 							cmd.WaitDelay = 100 * time.Millisecond
-							err := cmd.Run()
+							err = cmd.Run()
 							cancel()
 							status := uint32(0)
 							if err != nil {
@@ -128,12 +153,13 @@ func TestPoolSurvivesUpdate(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.pool.Close() })
 	original := c.pool
-	scrape := func() {
+	scrape := func() string {
 		t.Helper()
 		w := httptest.NewRecorder()
 		c.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics?target="+listener.Addr().String(), nil))
 		require.Equal(t, 200, w.Code)
 		require.Contains(t, w.Body.String(), "node_scrape_collector_success")
+		return w.Body.String()
 	}
 	scrape()
 	require.EqualValues(t, 1, dials.Load())
@@ -145,8 +171,59 @@ func TestPoolSurvivesUpdate(t *testing.T) {
 	require.EqualValues(t, 1, dials.Load(), "Update must retain the established SSH connection")
 	instance, _ := exports.Targets[0].Get("instance")
 	require.Equal(t, listener.Addr().String(), instance)
-	args.Targets = nil
+	// A credentials/timeout/label-only update must not reset CPU's per-target
+	// backwards-counter guard. Keep idle unchanged so this is not hotplug.
+	args.EnabledCollectors = []string{"cpu"}
+	require.NoError(t, os.WriteFile(procStat, []byte("cpu 1000 0 0 1000 0 0 0 0 0 0\ncpu0 1000 0 0 1000 0 0 0 0 0 0\n"), 0o600))
 	require.NoError(t, c.Update(args))
+	require.Contains(t, scrape(), `node_cpu_seconds_total{cpu="0",mode="user"} 10`)
+	args.Timeout = 4 * time.Second
+	args.Auths[0].Password = "synthetic-new"
+	args.Targets[0].Labels = map[string]string{"env": "updated"}
+	require.NoError(t, c.Update(args))
+	require.NoError(t, os.WriteFile(procStat, []byte("cpu 900 0 0 1000 0 0 0 0 0 0\ncpu0 900 0 0 1000 0 0 0 0 0 0\n"), 0o600))
+	if body := scrape(); !strings.Contains(body, `node_cpu_seconds_total{cpu="0",mode="user"} 10`) {
+		t.Errorf("CPU counter guard reset after unrelated configuration update: %s", body)
+	}
+
+	// Block the process-edge response writer after SSH collection completes.
+	// Target revocation must complete while that client remains stalled.
+	writer := &stalledResponseWriter{header: make(http.Header), started: make(chan struct{}), release: make(chan struct{})}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(writer.release) }) }
+	t.Cleanup(release)
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		c.Handler().ServeHTTP(writer, httptest.NewRequest("GET", "/metrics?target="+listener.Addr().String(), nil))
+	}()
+	select {
+	case <-writer.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("metrics response never reached the stalled writer")
+	}
+	args.Targets = nil
+	updated := make(chan error, 1)
+	go func() { updated <- c.Update(args) }()
+	select {
+	case err := <-updated:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Error("stalled HTTP response blocks target revocation")
+		release()
+		select {
+		case err := <-updated:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("configuration update did not recover after response release")
+		}
+	}
+	release()
+	select {
+	case <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("released response handler did not finish")
+	}
 	w := httptest.NewRecorder()
 	c.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics?target="+listener.Addr().String(), nil))
 	require.Equal(t, 400, w.Code)

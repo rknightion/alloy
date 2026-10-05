@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,13 +38,15 @@ func init() {
 
 // Component owns one connection pool for its entire lifetime.
 type Component struct {
-	opts    component.Options
-	mu      sync.RWMutex
-	pool    *sshrunner.Pool
-	scraper *agentless.Scraper
-	allowed map[string]agentless.Target
-	timeout time.Duration
-	base    discovery.Target
+	opts            component.Options
+	mu              sync.RWMutex
+	pool            *sshrunner.Pool
+	scraper         *agentless.Scraper
+	collectorNames  []string
+	collectorConfig collectors.Configs
+	allowed         map[string]agentless.Target
+	timeout         time.Duration
+	base            discovery.Target
 }
 
 var _ component.Component = (*Component)(nil)
@@ -83,23 +86,30 @@ func (c *Component) Update(raw component.Arguments) error {
 	if err := args.Validate(); err != nil {
 		return err
 	}
-	cs, err := collectors.Build(args.EnabledCollectors, args.collectorConfigs(), c.opts.Logger)
-	if err != nil {
-		return err
-	}
-	scraper, err := agentless.NewScraper(c.pool, cs, c.opts.Logger)
-	if err != nil {
-		return err
-	}
 	allowed := make(map[string]agentless.Target)
 	for _, t := range args.targets() {
 		allowed[t.Address] = agentless.Target{Address: t.Address, Auth: t.Auth}
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	cfg := args.collectorConfigs()
+	scraper := c.scraper
+	if scraper == nil || !slices.Equal(c.collectorNames, args.EnabledCollectors) || c.collectorConfig != cfg {
+		cs, err := collectors.Build(args.EnabledCollectors, cfg, c.opts.Logger)
+		if err != nil {
+			return err
+		}
+		scraper, err = agentless.NewScraper(c.pool, cs, c.opts.Logger)
+		if err != nil {
+			return err
+		}
+	}
 	if err := c.pool.Update(args.poolConfig()); err != nil {
 		return err
 	}
+	// Preserve stateful collectors across target, credential and timeout-only
+	// updates; the lifetime pool remains the scraper's runner.
+	c.collectorNames, c.collectorConfig = slices.Clone(args.EnabledCollectors), cfg
 	c.scraper, c.allowed, c.timeout = scraper, allowed, args.Timeout
 	c.opts.OnStateChange(exporter.Exports{Targets: buildTargets(c.base, args.targets())})
 	return nil
@@ -131,34 +141,41 @@ func (c *Component) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "exactly one configured target is required", http.StatusBadRequest)
 		return
 	}
-	// Hold the read lock through the scrape so a credential update cannot make
-	// an already-authorized request use a different configuration mid-batch.
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	target, ok := c.allowed[params[0]]
-	if !ok {
-		http.Error(w, "unknown target", http.StatusBadRequest)
-		return
-	}
-	timeout, err := scrapeTimeout(r.Header.Get("X-Prometheus-Scrape-Timeout-Seconds"), c.timeout)
+	metrics, status, err := c.collect(r, params[0])
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), status)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-	metrics, err := c.scraper.Scrape(ctx, target)
-	if err != nil {
-		// Transport errors may contain server-controlled or credential information.
-		http.Error(w, "SSH scrape failed", http.StatusServiceUnavailable)
-		return
-	}
+	// Metrics are immutable after collection. Never retain the configuration
+	// lock during HTTP delivery: a stalled client must not block revocation.
 	registry := prometheus.NewRegistry()
 	if err := registry.Register(metrics); err != nil {
 		http.Error(w, "metrics registration failed", http.StatusInternalServerError)
 		return
 	}
 	promhttp.HandlerFor(registry, promhttp.HandlerOpts{ErrorHandling: promhttp.ContinueOnError}).ServeHTTP(w, r)
+}
+
+func (c *Component) collect(r *http.Request, address string) (prometheus.Collector, int, error) {
+	// Serialize collection with credential updates, but not response writes.
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	target, ok := c.allowed[address]
+	if !ok {
+		return nil, http.StatusBadRequest, fmt.Errorf("unknown target")
+	}
+	timeout, err := scrapeTimeout(r.Header.Get("X-Prometheus-Scrape-Timeout-Seconds"), c.timeout)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	metrics, err := c.scraper.Scrape(ctx, target)
+	if err != nil {
+		// Never expose server-controlled or credential-bearing transport errors.
+		return nil, http.StatusServiceUnavailable, fmt.Errorf("SSH scrape failed")
+	}
+	return metrics, http.StatusOK, nil
 }
 
 func scrapeTimeout(header string, cap time.Duration) (time.Duration, error) {
