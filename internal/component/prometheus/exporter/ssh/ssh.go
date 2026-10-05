@@ -153,7 +153,7 @@ func (c *Component) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "metrics registration failed", http.StatusInternalServerError)
 		return
 	}
-	promhttp.HandlerFor(registry, promhttp.HandlerOpts{ErrorHandling: promhttp.ContinueOnError}).ServeHTTP(&scrapeResponseWriter{ResponseWriter: w, status: status}, r)
+	promhttp.HandlerFor(registry, promhttp.HandlerOpts{ErrorHandling: promhttp.ContinueOnError}).ServeHTTP(w, r)
 }
 
 func (c *Component) collect(r *http.Request, address string) (prometheus.Collector, int, error) {
@@ -172,13 +172,14 @@ func (c *Component) collect(r *http.Request, address string) (prometheus.Collect
 	defer cancel()
 	started := time.Now()
 	metrics, err := c.scraper.Scrape(ctx, target)
-	snapshot := &scrapeMetrics{duration: time.Since(started)}
 	if err != nil {
-		// Never expose server-controlled or credential-bearing transport errors.
-		return snapshot, http.StatusServiceUnavailable, nil
+		// Prometheus discards samples on HTTP 503. Its built-in target up=0
+		// and scrape_duration_seconds observe failures; do not depend on
+		// non-ingestible health samples in the rejected response body.
+		// Never expose server-controlled or credential-bearing errors.
+		return nil, http.StatusServiceUnavailable, fmt.Errorf("SSH scrape failed")
 	}
-	snapshot.node, snapshot.up = metrics, 1
-	return snapshot, http.StatusOK, nil
+	return &scrapeMetrics{node: metrics, up: 1, duration: time.Since(started)}, http.StatusOK, nil
 }
 
 func scrapeTimeout(header string, cap time.Duration) (time.Duration, error) {

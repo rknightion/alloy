@@ -2,6 +2,14 @@ package sshrunner
 
 import "github.com/prometheus/client_golang/prometheus"
 
+const (
+	dialErrorAuth    = "auth"
+	dialErrorHostKey = "host_key"
+	dialErrorTimeout = "timeout"
+	dialErrorRefused = "refused"
+	dialErrorOther   = "other"
+)
+
 // Pool metrics are component-wide aggregates. No series is keyed by target,
 // auth selection, credentials or remote error text, including retired entries.
 type poolMetrics struct {
@@ -32,7 +40,7 @@ func newPoolMetrics(p *Pool) *poolMetrics {
 	}
 	// Pre-create only this fixed vocabulary. Unknown transport failures are not
 	// forced into one of the actionable classes or labelled with raw error text.
-	for _, reason := range []string{"auth", "host_key", "timeout", "refused", "other"} {
+	for _, reason := range []string{dialErrorAuth, dialErrorHostKey, dialErrorTimeout, dialErrorRefused, dialErrorOther} {
 		m.errors.WithLabelValues(reason)
 	}
 	return m

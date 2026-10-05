@@ -152,9 +152,11 @@ func (p *Pool) dial(ctx context.Context, target agentless.Target, e *connection,
 	ctx, cancel := context.WithTimeout(ctx, cfg.DialTimeout)
 	defer cancel()
 	p.metrics.dials.Inc()
-	reason := "other"
+	reason := dialErrorOther
 	defer func() {
-		if reason != "" {
+		// Caller cancellation or configuration retirement is not evidence of
+		// target failure. Deadline expiry is still counted as a timeout.
+		if reason != "" && ctx.Err() != context.Canceled {
 			p.metrics.errors.WithLabelValues(reason).Inc()
 		}
 	}()
@@ -168,16 +170,16 @@ func (p *Pool) dial(ctx context.Context, target agentless.Target, e *connection,
 	}()
 	algorithms := cfg.algorithms(target.Address)
 	if len(algorithms) == 0 {
-		reason = "host_key"
+		reason = dialErrorHostKey
 		p.hostFailures.Inc()
 		return nil, nil, false, errors.New("sshrunner: no trusted host key algorithms for target")
 	}
 	raw, err := (&net.Dialer{}).DialContext(ctx, "tcp", target.Address)
 	if err != nil {
 		if errors.Is(err, syscall.ECONNREFUSED) {
-			reason = "refused"
+			reason = dialErrorRefused
 		} else if errors.Is(err, context.DeadlineExceeded) || (!contextLive(ctx) && ctx.Err() != context.Canceled) {
-			reason = "timeout"
+			reason = dialErrorTimeout
 		}
 		return nil, nil, false, errors.New("sshrunner: TCP connection failed")
 	}
@@ -203,12 +205,12 @@ func (p *Pool) dial(ctx context.Context, target agentless.Target, e *connection,
 	if err != nil || !stopped || ctx.Err() != nil {
 		_ = raw.Close()
 		if hostErr != nil {
-			reason = "host_key"
+			reason = dialErrorHostKey
 			return nil, nil, false, errors.New("sshrunner: host key verification failed: " + hostErr.Error())
 		}
 		var negotiation *ssh.AlgorithmNegotiationError
 		if errors.As(err, &negotiation) && negotiation.What == "host key" {
-			reason = "host_key"
+			reason = dialErrorHostKey
 			p.hostFailures.Inc()
 			return nil, nil, false, errors.New("sshrunner: host key algorithms do not match known_hosts")
 		}
@@ -219,11 +221,11 @@ func (p *Pool) dial(ctx context.Context, target agentless.Target, e *connection,
 		// of bad credentials. Do not expose server-controlled error strings.
 		auth := err != nil && hostVerified && contextLive(ctx)
 		if auth {
-			reason = "auth"
+			reason = dialErrorAuth
 			return nil, nil, true, errors.New("sshrunner: authentication failed")
 		}
 		if !contextLive(ctx) && ctx.Err() != context.Canceled {
-			reason = "timeout"
+			reason = dialErrorTimeout
 		}
 		return nil, nil, false, errors.New("sshrunner: SSH handshake failed")
 	}

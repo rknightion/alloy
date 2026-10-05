@@ -61,6 +61,36 @@ func TestPoolObservability(t *testing.T) {
 	require.Zero(t, poolValues(t, reg)["agentless_ssh_open_connections"])
 }
 
+func TestCancelledDialMetrics(t *testing.T) {
+	host, _ := signer(t)
+	s := serve(t, "127.0.0.1:0", host, "test-password", nil, false)
+	s.authDelay.Store(200 * time.Millisecond)
+	reg := prometheus.NewRegistry()
+	p, err := New(configFor(t, s, host.PublicKey()), nil, reg)
+	require.NoError(t, err)
+	defer p.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.Run(ctx, agentless.Target{Address: s.listener.Addr().String()}, []agentless.Read{agentless.CommandRead("true")})
+		done <- err
+	}()
+	require.Eventually(t, func() bool { return s.auths.Load() == 1 }, time.Second, time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("cancelled handshake did not return")
+	}
+	values := poolValues(t, reg)
+	require.Equal(t, float64(1), values["agentless_ssh_dials_total"])
+	for _, reason := range []string{"auth", "host_key", "timeout", "refused", "other"} {
+		require.Zero(t, values["agentless_ssh_dial_errors_total/"+reason], "caller cancellation is not a dial failure")
+	}
+}
+
 func TestDialErrorMetrics(t *testing.T) {
 	for _, reason := range []string{"auth", "host_key", "timeout", "refused"} {
 		t.Run(reason, func(t *testing.T) {

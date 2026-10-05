@@ -262,8 +262,8 @@ func TestPoolSurvivesUpdate(t *testing.T) {
 	c.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics?target="+listener.Addr().String(), nil))
 	require.Equal(t, 400, w.Code)
 	require.NotContains(t, w.Body.String(), "agentless_ssh_up")
-	// A real refused dial remains HTTP 503, but exports bounded health
-	// metrics without server error or credential labels.
+	// A real refused dial remains HTTP 503: Prometheus records target up=0
+	// and scrape_duration_seconds itself rather than ingesting rejected samples.
 	args.Targets = []Target{{Address: listener.Addr().String()}}
 	args.Auths[0].Password = "synthetic-refused"
 	require.NoError(t, listener.Close())
@@ -271,8 +271,9 @@ func TestPoolSurvivesUpdate(t *testing.T) {
 	w = httptest.NewRecorder()
 	c.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics?target="+listener.Addr().String(), nil))
 	require.Equal(t, 503, w.Code)
-	require.Contains(t, w.Body.String(), "agentless_ssh_up 0")
-	require.Contains(t, w.Body.String(), "agentless_ssh_scrape_duration_seconds")
+	require.Equal(t, "SSH scrape failed\n", w.Body.String())
+	require.NotContains(t, w.Body.String(), "agentless_ssh_up")
+	require.NotContains(t, w.Body.String(), "agentless_ssh_scrape_duration_seconds")
 	require.NotContains(t, w.Body.String(), "synthetic")
 	require.NotContains(t, w.Body.String(), "target=")
 	ctx, cancel := context.WithCancel(context.Background())
