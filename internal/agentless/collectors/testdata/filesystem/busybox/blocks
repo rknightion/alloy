@@ -1,0 +1,12 @@
+Filesystem           Type       1024-blocks    Used Available Capacity Mounted on
+overlay              overlay    475070464  94722948 380347516  20% /
+tmpfs                tmpfs          65536         0     65536   0% /dev
+shm                  tmpfs       11290624         0  11290624   0% /dev/shm
+/dev/vdb1            btrfs      475070464  94722948 380347516  20% /etc/resolv.conf
+/dev/vdb1            btrfs      475070464  94722948 380347516  20% /etc/hostname
+/dev/vdb1            btrfs      475070464  94722948 380347516  20% /etc/hosts
+tmpfs                tmpfs              4         0         4   0% /proc/asound
+tmpfs                tmpfs          65536         0     65536   0% /proc/interrupts
+tmpfs                tmpfs          65536         0     65536   0% /proc/keys
+tmpfs                tmpfs          65536         0     65536   0% /proc/timer_list
+tmpfs                tmpfs              4         0         4   0% /sys/firmware

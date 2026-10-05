@@ -1,0 +1,46 @@
+# Weaker self-authored golden from real gnu df output; not a node_exporter e2e oracle.
+# df -kPT rounds to 1024-byte blocks; size/avail may differ from statfs by <1024 bytes,
+# and free=(size-used)*1024 may differ by <2048 bytes. Inodes are unscaled.
+# GNU recorded read-only over SSH; BusyBox 1.37 recorded in an invocation-owned local container.
+# HELP node_filesystem_size_bytes Filesystem size in bytes.
+# TYPE node_filesystem_size_bytes gauge
+node_filesystem_size_bytes{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 4143677440
+node_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run"} 26969432064
+node_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/tmp"} 67423576064
+node_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/user/1000"} 13484711936
+# HELP node_filesystem_avail_bytes Filesystem space available to non-root users in bytes.
+# TYPE node_filesystem_avail_bytes gauge
+node_filesystem_avail_bytes{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 3043446784
+node_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run"} 26969296896
+node_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/tmp"} 67423576064
+node_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/user/1000"} 13484707840
+# HELP node_filesystem_free_bytes Filesystem free space in bytes.
+# TYPE node_filesystem_free_bytes gauge
+node_filesystem_free_bytes{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 3274969088
+node_filesystem_free_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run"} 26969296896
+node_filesystem_free_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/tmp"} 67423576064
+node_filesystem_free_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/user/1000"} 13484707840
+# HELP node_filesystem_files Filesystem total file nodes.
+# TYPE node_filesystem_files gauge
+node_filesystem_files{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 262144
+node_filesystem_files{device="tmpfs",fstype="tmpfs",mountpoint="/run"} 819200
+node_filesystem_files{device="tmpfs",fstype="tmpfs",mountpoint="/tmp"} 1048576
+node_filesystem_files{device="tmpfs",fstype="tmpfs",mountpoint="/run/user/1000"} 3292166
+# HELP node_filesystem_files_free Filesystem total free file nodes.
+# TYPE node_filesystem_files_free gauge
+node_filesystem_files_free{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 234755
+node_filesystem_files_free{device="tmpfs",fstype="tmpfs",mountpoint="/run"} 819019
+node_filesystem_files_free{device="tmpfs",fstype="tmpfs",mountpoint="/tmp"} 1048569
+node_filesystem_files_free{device="tmpfs",fstype="tmpfs",mountpoint="/run/user/1000"} 3292146
+# HELP node_filesystem_readonly Filesystem read-only status.
+# TYPE node_filesystem_readonly gauge
+node_filesystem_readonly{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 0
+node_filesystem_readonly{device="tmpfs",fstype="tmpfs",mountpoint="/run"} 0
+node_filesystem_readonly{device="tmpfs",fstype="tmpfs",mountpoint="/tmp"} 0
+node_filesystem_readonly{device="tmpfs",fstype="tmpfs",mountpoint="/run/user/1000"} 0
+# HELP node_filesystem_device_error Whether an error occurred while getting statistics for the given device.
+# TYPE node_filesystem_device_error gauge
+node_filesystem_device_error{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 0
+node_filesystem_device_error{device="tmpfs",fstype="tmpfs",mountpoint="/run"} 0
+node_filesystem_device_error{device="tmpfs",fstype="tmpfs",mountpoint="/tmp"} 0
+node_filesystem_device_error{device="tmpfs",fstype="tmpfs",mountpoint="/run/user/1000"} 0

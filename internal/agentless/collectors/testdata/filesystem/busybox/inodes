@@ -1,0 +1,12 @@
+Filesystem           Type          Inodes      Used Available Capacity Mounted on
+overlay              overlay            0         0         0   0% /
+tmpfs                tmpfs        2822707        15   2822692   0% /dev
+shm                  tmpfs        2822707         1   2822706   0% /dev/shm
+/dev/vdb1            btrfs              0         0         0   0% /etc/resolv.conf
+/dev/vdb1            btrfs              0         0         0   0% /etc/hostname
+/dev/vdb1            btrfs              0         0         0   0% /etc/hosts
+tmpfs                tmpfs              1         1         0 100% /proc/asound
+tmpfs                tmpfs        2822707        15   2822692   0% /proc/interrupts
+tmpfs                tmpfs        2822707        15   2822692   0% /proc/keys
+tmpfs                tmpfs        2822707        15   2822692   0% /proc/timer_list
+tmpfs                tmpfs              1         1         0 100% /sys/firmware

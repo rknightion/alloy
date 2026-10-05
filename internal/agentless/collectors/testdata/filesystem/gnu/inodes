@@ -1,0 +1,8 @@
+Filesystem                       Type       Inodes IUsed    IFree IUse% Mounted on
+/dev/mapper/pve-vm--107--disk--0 ext4       262144 27389   234755   11% /
+none                             tmpfs    16460834    24 16460810    1% /dev
+efivarfs                         efivarfs        0     0        0     - /sys/firmware/efi/efivars
+tmpfs                            tmpfs    16460834     1 16460833    1% /dev/shm
+tmpfs                            tmpfs      819200   181   819019    1% /run
+tmpfs                            tmpfs     1048576     7  1048569    1% /tmp
+tmpfs                            tmpfs     3292166    20  3292146    1% /run/user/1000

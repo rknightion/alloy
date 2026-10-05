@@ -1,0 +1,8 @@
+Filesystem                       Type     1024-blocks   Used Available Capacity Mounted on
+/dev/mapper/pve-vm--107--disk--0 ext4         4046560 848348   2972116      23% /
+none                             tmpfs            492      4       488       1% /dev
+efivarfs                         efivarfs         256    160        92      64% /sys/firmware/efi/efivars
+tmpfs                            tmpfs       65843336      0  65843336       0% /dev/shm
+tmpfs                            tmpfs       26337336    132  26337204       1% /run
+tmpfs                            tmpfs       65843336      0  65843336       0% /tmp
+tmpfs                            tmpfs       13168664      4  13168660       1% /run/user/1000

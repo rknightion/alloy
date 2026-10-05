@@ -1,0 +1,39 @@
+# Weaker self-authored golden from real busybox df output; not a node_exporter e2e oracle.
+# df -kPT rounds to 1024-byte blocks; size/avail may differ from statfs by <1024 bytes,
+# and free=(size-used)*1024 may differ by <2048 bytes. Inodes are unscaled.
+# GNU recorded read-only over SSH; BusyBox 1.37 recorded in an invocation-owned local container.
+# HELP node_filesystem_size_bytes Filesystem size in bytes.
+# TYPE node_filesystem_size_bytes gauge
+node_filesystem_size_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 486472155136
+node_filesystem_size_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 486472155136
+node_filesystem_size_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 486472155136
+# HELP node_filesystem_avail_bytes Filesystem space available to non-root users in bytes.
+# TYPE node_filesystem_avail_bytes gauge
+node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 389475856384
+node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 389475856384
+node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 389475856384
+# HELP node_filesystem_free_bytes Filesystem free space in bytes.
+# TYPE node_filesystem_free_bytes gauge
+node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 389475856384
+node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 389475856384
+node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 389475856384
+# HELP node_filesystem_files Filesystem total file nodes.
+# TYPE node_filesystem_files gauge
+node_filesystem_files{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 0
+node_filesystem_files{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 0
+node_filesystem_files{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 0
+# HELP node_filesystem_files_free Filesystem total free file nodes.
+# TYPE node_filesystem_files_free gauge
+node_filesystem_files_free{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 0
+node_filesystem_files_free{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 0
+node_filesystem_files_free{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 0
+# HELP node_filesystem_readonly Filesystem read-only status.
+# TYPE node_filesystem_readonly gauge
+node_filesystem_readonly{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 0
+node_filesystem_readonly{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 0
+node_filesystem_readonly{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 0
+# HELP node_filesystem_device_error Whether an error occurred while getting statistics for the given device.
+# TYPE node_filesystem_device_error gauge
+node_filesystem_device_error{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 0
+node_filesystem_device_error{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 0
+node_filesystem_device_error{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 0
