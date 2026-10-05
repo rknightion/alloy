@@ -113,6 +113,7 @@ type Pool struct {
 	closed       bool
 	dials        int
 	hostFailures prometheus.Counter
+	metrics      *poolMetrics
 }
 
 // All mutable connection fields are guarded by Pool.mu. Network operations
@@ -141,8 +142,9 @@ func New(cfg Config, logger *slog.Logger, reg prometheus.Registerer) (*Pool, err
 	p := &Pool{cfg: s, entries: make(map[agentless.Target]*connection), notify: make(chan struct{}), hostFailures: prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "agentless_ssh_host_key_failures_total", Help: "SSH handshakes rejected by mandatory host key verification.",
 	})}
+	p.metrics = newPoolMetrics(p)
 	if reg != nil {
-		if err := reg.Register(p.hostFailures); err != nil {
+		if err := reg.Register(p.metrics); err != nil {
 			return nil, err
 		}
 	}
@@ -203,6 +205,7 @@ func (p *Pool) Run(ctx context.Context, target agentless.Target, reads []agentle
 	release := func() {
 		p.mu.Lock()
 		e.active--
+		p.metrics.sessions.Dec()
 		e.lastUse = time.Now()
 		p.signal()
 		p.mu.Unlock()

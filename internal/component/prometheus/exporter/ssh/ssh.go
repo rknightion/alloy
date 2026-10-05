@@ -153,7 +153,7 @@ func (c *Component) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "metrics registration failed", http.StatusInternalServerError)
 		return
 	}
-	promhttp.HandlerFor(registry, promhttp.HandlerOpts{ErrorHandling: promhttp.ContinueOnError}).ServeHTTP(w, r)
+	promhttp.HandlerFor(registry, promhttp.HandlerOpts{ErrorHandling: promhttp.ContinueOnError}).ServeHTTP(&scrapeResponseWriter{ResponseWriter: w, status: status}, r)
 }
 
 func (c *Component) collect(r *http.Request, address string) (prometheus.Collector, int, error) {
@@ -170,12 +170,15 @@ func (c *Component) collect(r *http.Request, address string) (prometheus.Collect
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
+	started := time.Now()
 	metrics, err := c.scraper.Scrape(ctx, target)
+	snapshot := &scrapeMetrics{duration: time.Since(started)}
 	if err != nil {
 		// Never expose server-controlled or credential-bearing transport errors.
-		return nil, http.StatusServiceUnavailable, fmt.Errorf("SSH scrape failed")
+		return snapshot, http.StatusServiceUnavailable, nil
 	}
-	return metrics, http.StatusOK, nil
+	snapshot.node, snapshot.up = metrics, 1
+	return snapshot, http.StatusOK, nil
 }
 
 func scrapeTimeout(header string, cap time.Duration) (time.Duration, error) {

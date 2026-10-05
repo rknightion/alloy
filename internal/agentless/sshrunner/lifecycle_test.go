@@ -52,10 +52,11 @@ func TestHostAlgorithmMismatchMetric(t *testing.T) {
 	_, err = p.Run(context.Background(), agentless.Target{Address: s.listener.Addr().String()}, []agentless.Read{agentless.CommandRead("true")})
 	require.ErrorContains(t, err, "host key")
 	require.EqualValues(t, 0, s.auths.Load())
-	families, err := reg.Gather()
-	require.NoError(t, err)
-	require.Len(t, families, 1)
-	require.Equal(t, float64(1), families[0].Metric[0].GetCounter().GetValue())
+	// The registry now includes aggregate pool metrics as well as host-key
+	// failures; assert the named security counter rather than family order.
+	values := poolValues(t, reg)
+	require.Equal(t, float64(1), values["agentless_ssh_host_key_failures_total"])
+	require.Equal(t, float64(1), values["agentless_ssh_dial_errors_total/host_key"])
 }
 
 func TestDifferentCAAndHostAlgorithms(t *testing.T) {

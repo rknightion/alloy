@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -47,6 +49,8 @@ func (w *stalledResponseWriter) Write(p []byte) (int, error) {
 // It uses generated host keys and a synthetic password, never lab credentials.
 func TestPoolSurvivesUpdate(t *testing.T) {
 	procStat := filepath.Join(t.TempDir(), "stat")
+	procLoadavg := filepath.Join(t.TempDir(), "loadavg")
+	require.NoError(t, os.WriteFile(procLoadavg, []byte("1.5 2.0 3.0 1/42 100\n"), 0o600))
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	host, err := gossh.NewSignerFromKey(key)
@@ -107,7 +111,9 @@ func TestPoolSurvivesUpdate(t *testing.T) {
 							cmd := exec.CommandContext(ctx, "sh", "-s")
 							// Supply Linux proc data at the server/process edge on
 							// any host, retaining the real SSH batch protocol.
-							cmd.Stdin = strings.NewReader(strings.ReplaceAll(string(script), "/proc/stat", procStat))
+							fixedScript := strings.ReplaceAll(string(script), "/proc/stat", procStat)
+							fixedScript = strings.ReplaceAll(fixedScript, "/proc/loadavg", procLoadavg)
+							cmd.Stdin = strings.NewReader("sleep 0.05\n" + fixedScript)
 							cmd.Stdout = ch
 							cmd.Stderr = io.Discard
 							cmd.WaitDelay = 100 * time.Millisecond
@@ -143,7 +149,8 @@ func TestPoolSurvivesUpdate(t *testing.T) {
 	args.Targets = []Target{{Name: "loopback", Address: listener.Addr().String()}}
 	args.EnabledCollectors = []string{"loadavg"}
 	var exports exporter.Exports
-	opts := component.Options{ID: "prometheus.exporter.ssh.test", Logger: util.TestAlloyLogger(t).Slog(), Registerer: prometheus.NewRegistry(),
+	componentRegistry := prometheus.NewRegistry()
+	opts := component.Options{ID: "prometheus.exporter.ssh.test", Logger: util.TestAlloyLogger(t).Slog(), Registerer: componentRegistry,
 		OnStateChange: func(e component.Exports) { exports = e.(exporter.Exports) },
 		GetServiceData: func(string) (any, error) {
 			return httpservice.Data{MemoryListenAddr: "alloy.internal:12345", BaseHTTPPath: "/"}, nil
@@ -159,9 +166,36 @@ func TestPoolSurvivesUpdate(t *testing.T) {
 		c.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics?target="+listener.Addr().String(), nil))
 		require.Equal(t, 200, w.Code)
 		require.Contains(t, w.Body.String(), "node_scrape_collector_success")
+		require.Contains(t, w.Body.String(), "node_scrape_collector_duration_seconds")
+		require.Contains(t, w.Body.String(), "agentless_ssh_up 1")
+		require.Contains(t, w.Body.String(), "agentless_ssh_scrape_duration_seconds")
+		require.NotContains(t, w.Body.String(), "target=")
+		require.NotContains(t, w.Body.String(), "synthetic")
 		return w.Body.String()
 	}
-	scrape()
+	body := scrape()
+	require.Contains(t, body, `node_scrape_collector_success{collector="loadavg"} 1`)
+	value := func(pattern string) float64 {
+		t.Helper()
+		match := regexp.MustCompile(pattern).FindStringSubmatch(body)
+		require.Len(t, match, 2)
+		n, err := strconv.ParseFloat(match[1], 64)
+		require.NoError(t, err)
+		return n
+	}
+	require.GreaterOrEqual(t, value(`(?m)^agentless_ssh_scrape_duration_seconds ([^\n]+)`), 0.05, "remote round trip is included")
+	require.Less(t, value(`(?m)^node_scrape_collector_duration_seconds\{collector="loadavg"\} ([^\n]+)`), 0.05, "collector timing remains local Update time")
+	families, err := componentRegistry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		require.NotEqual(t, "agentless_ssh_up", family.GetName())
+		require.NotEqual(t, "agentless_ssh_scrape_duration_seconds", family.GetName())
+		for _, metric := range family.Metric {
+			for _, label := range metric.Label {
+				require.Equal(t, "reason", label.GetName(), "no persistent per-target series")
+			}
+		}
+	}
 	require.EqualValues(t, 1, dials.Load())
 	args.Timeout = 3 * time.Second
 	args.EnabledCollectors = []string{"uname"}
@@ -227,6 +261,20 @@ func TestPoolSurvivesUpdate(t *testing.T) {
 	w := httptest.NewRecorder()
 	c.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics?target="+listener.Addr().String(), nil))
 	require.Equal(t, 400, w.Code)
+	require.NotContains(t, w.Body.String(), "agentless_ssh_up")
+	// A real refused dial remains HTTP 503, but exports bounded health
+	// metrics without server error or credential labels.
+	args.Targets = []Target{{Address: listener.Addr().String()}}
+	args.Auths[0].Password = "synthetic-refused"
+	require.NoError(t, listener.Close())
+	require.NoError(t, c.Update(args))
+	w = httptest.NewRecorder()
+	c.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics?target="+listener.Addr().String(), nil))
+	require.Equal(t, 503, w.Code)
+	require.Contains(t, w.Body.String(), "agentless_ssh_up 0")
+	require.Contains(t, w.Body.String(), "agentless_ssh_scrape_duration_seconds")
+	require.NotContains(t, w.Body.String(), "synthetic")
+	require.NotContains(t, w.Body.String(), "target=")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	require.NoError(t, c.Run(ctx))

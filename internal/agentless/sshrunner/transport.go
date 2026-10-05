@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -89,6 +90,7 @@ func (p *Pool) acquire(ctx context.Context, target agentless.Target) (*connectio
 		}
 		if e.client != nil && e.active < cfg.MaxSessionsPerTarget {
 			e.active++
+			p.metrics.sessions.Inc()
 			e.lastUse = time.Now()
 			client, raw := e.client, e.raw
 			p.mu.Unlock()
@@ -149,6 +151,13 @@ func contextLive(ctx context.Context) bool {
 func (p *Pool) dial(ctx context.Context, target agentless.Target, e *connection, cfg *settings) (*ssh.Client, net.Conn, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.DialTimeout)
 	defer cancel()
+	p.metrics.dials.Inc()
+	reason := "other"
+	defer func() {
+		if reason != "" {
+			p.metrics.errors.WithLabelValues(reason).Inc()
+		}
+	}()
 	// Update/Close must cancel a dial even before TCP is connected.
 	go func() {
 		select {
@@ -159,11 +168,17 @@ func (p *Pool) dial(ctx context.Context, target agentless.Target, e *connection,
 	}()
 	algorithms := cfg.algorithms(target.Address)
 	if len(algorithms) == 0 {
+		reason = "host_key"
 		p.hostFailures.Inc()
 		return nil, nil, false, errors.New("sshrunner: no trusted host key algorithms for target")
 	}
 	raw, err := (&net.Dialer{}).DialContext(ctx, "tcp", target.Address)
 	if err != nil {
+		if errors.Is(err, syscall.ECONNREFUSED) {
+			reason = "refused"
+		} else if errors.Is(err, context.DeadlineExceeded) || (!contextLive(ctx) && ctx.Err() != context.Canceled) {
+			reason = "timeout"
+		}
 		return nil, nil, false, errors.New("sshrunner: TCP connection failed")
 	}
 	deadline, _ := ctx.Deadline()
@@ -188,10 +203,12 @@ func (p *Pool) dial(ctx context.Context, target agentless.Target, e *connection,
 	if err != nil || !stopped || ctx.Err() != nil {
 		_ = raw.Close()
 		if hostErr != nil {
+			reason = "host_key"
 			return nil, nil, false, errors.New("sshrunner: host key verification failed: " + hostErr.Error())
 		}
 		var negotiation *ssh.AlgorithmNegotiationError
 		if errors.As(err, &negotiation) && negotiation.What == "host key" {
+			reason = "host_key"
 			p.hostFailures.Inc()
 			return nil, nil, false, errors.New("sshrunner: host key algorithms do not match known_hosts")
 		}
@@ -202,11 +219,16 @@ func (p *Pool) dial(ctx context.Context, target agentless.Target, e *connection,
 		// of bad credentials. Do not expose server-controlled error strings.
 		auth := err != nil && hostVerified && contextLive(ctx)
 		if auth {
+			reason = "auth"
 			return nil, nil, true, errors.New("sshrunner: authentication failed")
+		}
+		if !contextLive(ctx) && ctx.Err() != context.Canceled {
+			reason = "timeout"
 		}
 		return nil, nil, false, errors.New("sshrunner: SSH handshake failed")
 	}
 	_ = raw.SetDeadline(time.Time{})
+	reason = ""
 	return ssh.NewClient(conn, channels, requests), raw, false, nil
 }
 
