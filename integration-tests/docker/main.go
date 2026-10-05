@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -55,6 +57,20 @@ func runIntegrationTests(cmd *cobra.Command, args []string) {
 	ctx := cmd.Context()
 	repoRootDir = mustFindRepoRoot()
 	testsRootDir = filepath.Join(repoRootDir, "integration-tests", "docker")
+
+	// This scenario owns its build and isolated Docker resources. Dispatch before
+	// the shared environment so the explicit filter never touches other services.
+	if specificTest == "ssh-exporter" {
+		testCtx, cancel := context.WithTimeout(ctx, testTimeout)
+		defer cancel()
+		testCmd := exec.CommandContext(testCtx, "go", "test", "-v", "-count=1", "-tags=alloyintegrationtests", "-timeout="+testTimeout.String(), "./integration-tests/docker/tests/ssh-exporter")
+		testCmd.Dir = repoRootDir
+		testCmd.Stdout, testCmd.Stderr = os.Stdout, os.Stderr
+		if err := testCmd.Run(); err != nil {
+			log.Fatalf("SSH integration scenario failed: %v", err)
+		}
+		return
+	}
 
 	if !skipBuild {
 		buildBaseAlloyImage()
