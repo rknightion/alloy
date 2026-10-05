@@ -108,6 +108,8 @@ func TestValidation(t *testing.T) {
 		{"filesystem regex", func(a *Arguments) { a.Filesystem.FSTypesExclude = "[" }},
 		{"auth", func(a *Arguments) { a.Targets[0].Auth = "missing" }},
 		{"duplicate target", func(a *Arguments) { a.Targets = append(a.Targets, a.Targets[0]) }},
+		{"duplicate default port", func(a *Arguments) { a.Targets = append(a.Targets, Target{Address: "host:22"}) }},
+		{"duplicate IPv6 default port", func(a *Arguments) { a.Targets = []Target{{Address: "::1"}, {Address: "[::1]:22"}} }},
 		{"ambiguous", func(a *Arguments) {
 			a.TargetsList = []discovery.Target{discovery.NewTargetFromMap(map[string]string{"__address__": "host"})}
 		}},

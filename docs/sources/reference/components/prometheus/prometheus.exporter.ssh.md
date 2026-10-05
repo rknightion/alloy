@@ -99,7 +99,7 @@ A non-empty include takes precedence over the exclude.
 
 | Name | Type | Description | Default | Required |
 | ---- | ---- | ----------- | ------- | -------- |
-| `device_exclude` | `string` | Exclude matching disk devices. | `"^(ram|loop|fd|(h|s|v|xv)d[a-z]|nvme\\d+n\\d+p)\\d+$"` | no |
+| `device_exclude` | `string` | Exclude matching disk devices. | `"^(ram\|loop\|fd\|(h\|s\|v\|xv)d[a-z]\|nvme\\d+n\\d+p)\\d+$"` | no |
 | `device_include` | `string` | Include only matching disk devices. | | no |
 
 ### `filesystem`

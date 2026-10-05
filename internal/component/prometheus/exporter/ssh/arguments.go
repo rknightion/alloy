@@ -162,10 +162,11 @@ func (a Arguments) Validate() error {
 		if err := validateAddress(t.Address); err != nil {
 			return err
 		}
-		if seen[t.Address] {
+		address := targetKey(t.Address)
+		if seen[address] {
 			return errors.New("duplicate target address")
 		}
-		seen[t.Address] = true
+		seen[address] = true
 		auth := t.Auth
 		if auth == "" {
 			auth = sshrunner.DefaultAuthName
@@ -203,6 +204,20 @@ func (a Arguments) Validate() error {
 		}
 	}
 	return nil
+}
+
+// targetKey compares validated destinations without changing the configured
+// address used by the HTTP allowlist or the exported instance label.
+func targetKey(address string) string {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		host, port = address, sshrunner.DefaultPort
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	}
+	n, _ := strconv.Atoi(port)
+	return net.JoinHostPort(strings.ToLower(host), strconv.Itoa(n))
 }
 
 func validateAddress(address string) error {
