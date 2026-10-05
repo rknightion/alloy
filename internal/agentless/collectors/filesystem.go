@@ -69,20 +69,13 @@ func (c *filesystemCollector) Name() string { return "filesystem" }
 
 // Reads implements agentless.Collector.
 func (c *filesystemCollector) Reads() []agentless.Read {
-	return []agentless.Read{agentless.CommandRead("df", "-kPT"), agentless.CommandRead("df", "-iPT"), agentless.FileRead("/proc/self/mounts")}
+	// -a includes duplicate/bind mounts which GNU df otherwise suppresses.
+	return []agentless.Read{agentless.CommandRead("df", "-akPT"), agentless.CommandRead("df", "-aiPT"), agentless.FileRead("/proc/self/mounts")}
 }
 
 // Update implements agentless.Collector.
 func (c *filesystemCollector) Update(_ agentless.Target, in agentless.Input, ch chan<- prometheus.Metric) error {
 	reads := c.Reads()
-	blocks, err := filesystemDF(in, reads[0])
-	if err != nil {
-		return err
-	}
-	inodes, err := filesystemDF(in, reads[1])
-	if err != nil {
-		return err
-	}
 	mountResult, ok := in[reads[2].ID]
 	if !ok || mountResult.NotExist {
 		return fmt.Errorf("filesystem mounts missing")
@@ -91,7 +84,7 @@ func (c *filesystemCollector) Update(_ agentless.Target, in agentless.Input, ch 
 	if err != nil {
 		return err
 	}
-	seen := map[filesystemKey]bool{}
+	keys := map[filesystemKey]string{}
 	for _, line := range strings.Split(string(mounts), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -101,10 +94,17 @@ func (c *filesystemCollector) Update(_ agentless.Target, in agentless.Input, ch 
 			return fmt.Errorf("malformed filesystem mount row %q", line)
 		}
 		key := filesystemKey{filesystemUnescape(fields[0]), fields[2], filesystemUnescape(fields[1])}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
+		keys[key] = fields[3]
+	}
+	blocks, err := filesystemDF(in, reads[0], keys)
+	if err != nil {
+		return err
+	}
+	inodes, err := filesystemDF(in, reads[1], keys)
+	if err != nil {
+		return err
+	}
+	for key, options := range keys {
 		if c.mountExclude != nil && c.mountExclude.MatchString(key.mount) || c.typeExclude != nil && c.typeExclude.MatchString(key.fstype) {
 			continue
 		}
@@ -124,7 +124,7 @@ func (c *filesystemCollector) Update(_ agentless.Target, in agentless.Input, ch 
 		emit("files", i.total)
 		emit("files_free", i.available)
 		readonly := float64(0)
-		for _, option := range strings.Split(fields[3], ",") {
+		for _, option := range strings.Split(options, ",") {
 			if option == "ro" {
 				readonly = 1
 			}
@@ -137,11 +137,12 @@ func (c *filesystemCollector) Update(_ agentless.Target, in agentless.Input, ch 
 type filesystemKey struct{ device, fstype, mount string }
 type filesystemUsage struct{ total, used, available float64 }
 
-// df -P keeps each record on one line, including long device names. The mount
-// point occupies the remainder of the row and may contain literal spaces.
+// df -P keeps each record on one line, including long device names. Both the
+// source and mount point may contain literal whitespace: match them against
+// decoded mount metadata before splitting the five intervening columns.
 // Exit 1 is useful GNU output when another mount failed; missing rows are
 // reported as device_error using the mount table, not silently dropped.
-func filesystemDF(in agentless.Input, read agentless.Read) (map[filesystemKey]filesystemUsage, error) {
+func filesystemDF(in agentless.Input, read agentless.Read, mounts map[filesystemKey]string) (map[filesystemKey]filesystemUsage, error) {
 	result, ok := in[read.ID]
 	if !ok || result.NotExist || result.Truncated || result.TimedOut || result.ExitStatus < 0 || result.ExitStatus > 1 {
 		return nil, fmt.Errorf("filesystem read %q unavailable", read.ID)
@@ -155,27 +156,59 @@ func filesystemDF(in agentless.Input, read agentless.Read) (map[filesystemKey]fi
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		f := strings.Fields(line)
-		if len(f) < 7 {
-			return nil, fmt.Errorf("malformed df row %q", line)
-		}
-		var values [3]float64
-		for j := range values {
-			// Some filesystems do not expose inode counts; GNU prints '-' for them.
-			if f[j+2] == "-" && len(read.Argv) > 1 && read.Argv[1] == "-iPT" {
+		for key := range mounts {
+			// Match exact endpoints, leaving padding for Fields to remove. Do
+			// not decode df text: unlike proc mounts it contains literal names.
+			row := strings.TrimLeft(line, " \t")
+			if !strings.HasPrefix(row, key.device) || !strings.HasSuffix(row, key.mount) {
 				continue
 			}
-			n, err := strconv.ParseUint(f[j+2], 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("invalid df count %q: %w", f[j+2], err)
+			end := len(row) - len(key.mount)
+			if end <= len(key.device) {
+				continue
 			}
-			values[j] = float64(n)
+			middle := row[len(key.device):end]
+			if !strings.HasPrefix(middle, " ") && !strings.HasPrefix(middle, "\t") {
+				continue
+			}
+			if !strings.HasSuffix(middle, " ") && !strings.HasSuffix(middle, "\t") {
+				continue
+			}
+			f := strings.Fields(middle)
+			if len(f) != 5 || f[0] != key.fstype && f[0] != "-" {
+				continue
+			}
+			// GNU -a prints '-' for inaccessible/shadowed mounts. Leaving
+			// the row absent reports device_error, not fictitious zero space.
+			if f[0] == "-" || f[1] == "-" && !strings.Contains(read.Argv[1], "i") {
+				continue
+			}
+			var values [3]float64
+			for j := range values {
+				if f[j+1] == "-" && strings.Contains(read.Argv[1], "i") {
+					continue
+				}
+				if j == 2 {
+					// f_bavail can be negative when reserved space is exhausted.
+					n, err := strconv.ParseInt(f[j+1], 10, 64)
+					if err != nil {
+						return nil, fmt.Errorf("invalid df count %q: %w", f[j+1], err)
+					}
+					values[j] = float64(n)
+				} else {
+					n, err := strconv.ParseUint(f[j+1], 10, 64)
+					if err != nil {
+						return nil, fmt.Errorf("invalid df count %q: %w", f[j+1], err)
+					}
+					values[j] = float64(n)
+				}
+			}
+			if values[1] > values[0] {
+				return nil, fmt.Errorf("df used exceeds total in %q", line)
+			}
+			out[key] = filesystemUsage{values[0], values[1], values[2]}
 		}
-		if values[1] > values[0] {
-			return nil, fmt.Errorf("df used exceeds total in %q", line)
-		}
-		key := filesystemKey{filesystemUnescape(f[0]), f[1], filesystemUnescape(strings.Join(f[6:], " "))}
-		out[key] = filesystemUsage{values[0], values[1], values[2]}
+
 	}
 	return out, nil
 }

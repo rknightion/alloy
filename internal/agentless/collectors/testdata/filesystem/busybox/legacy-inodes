@@ -1,11 +1,6 @@
 Filesystem           Type          Inodes      Used Available Capacity Mounted on
 overlay              overlay            0         0         0   0% /
-proc                 proc               0         0         0   0% /proc
 tmpfs                tmpfs        2822707        63   2822644   0% /dev
-devpts               devpts             0         0         0   0% /dev/pts
-sysfs                sysfs              0         0         0   0% /sys
-cgroup               cgroup2            0         0         0   0% /sys/fs/cgroup
-mqueue               mqueue             0         0         0   0% /dev/mqueue
 shm                  tmpfs        2822707         1   2822706   0% /dev/shm
 /dev/vdb1            btrfs              0         0         0   0% /etc/resolv.conf
 /dev/vdb1            btrfs              0         0         0   0% /etc/hostname

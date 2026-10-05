@@ -20,7 +20,7 @@ var filesystemFamilies = []string{"node_filesystem_size_bytes", "node_filesystem
 func filesystemInput(t *testing.T, c agentless.Collector, flavor string) agentless.Input {
 	t.Helper()
 	root := filepath.Join("testdata", "filesystem", flavor)
-	runner, err := agentlesstest.FromFS(root, map[string]string{agentless.CommandRead("df", "-kPT").ID: filepath.Join(root, "blocks"), agentless.CommandRead("df", "-iPT").ID: filepath.Join(root, "inodes")}, c.Reads())
+	runner, err := agentlesstest.FromFS(root, map[string]string{agentless.CommandRead("df", "-akPT").ID: filepath.Join(root, "blocks"), agentless.CommandRead("df", "-aiPT").ID: filepath.Join(root, "inodes")}, c.Reads())
 	require.NoError(t, err)
 	results, err := runner.Run(context.Background(), agentless.Target{}, c.Reads())
 	require.NoError(t, err)
@@ -50,12 +50,12 @@ func filesystemMetrics(t *testing.T, c agentless.Collector, in agentless.Input) 
 }
 
 func TestFilesystemRealOutput(t *testing.T) {
-	for _, flavor := range []string{"gnu", "busybox"} {
+	for _, flavor := range []string{"gnu", "busybox", "gnu-local"} {
 		t.Run(flavor, func(t *testing.T) {
 			c, err := newFilesystemCollector(DefaultConfigs(), nil)
 			require.NoError(t, err)
 			root := filepath.Join("testdata", "filesystem", flavor)
-			conformance.Check(t, conformance.Case{Collector: c, Families: filesystemFamilies, Root: root, Commands: map[string]string{agentless.CommandRead("df", "-kPT").ID: filepath.Join(root, "blocks"), agentless.CommandRead("df", "-iPT").ID: filepath.Join(root, "inodes")}, Expected: filepath.Join(root, "expected.prom")})
+			conformance.Check(t, conformance.Case{Collector: c, Families: filesystemFamilies, Root: root, Commands: map[string]string{agentless.CommandRead("df", "-akPT").ID: filepath.Join(root, "blocks"), agentless.CommandRead("df", "-aiPT").ID: filepath.Join(root, "inodes")}, Expected: filepath.Join(root, "expected.prom")})
 			in := filesystemInput(t, c, flavor)
 			for _, read := range c.Reads()[:2] {
 				r := in[read.ID]
@@ -118,6 +118,84 @@ func TestFilesystemConfigAndErrors(t *testing.T) {
 	require.Len(t, m["node_filesystem_device_error"], 2)
 	in[c.Reads()[0].ID] = agentless.Result{Output: []byte("garbage")}
 	require.Error(t, c.Update(agentless.Target{}, in, make(chan prometheus.Metric, 4096)))
+}
+
+// These regressions use real GNU/BusyBox output from local, invocation-owned
+// tmpfs and bind mounts, not a node_exporter oracle. Legacy GNU df omits the
+// duplicate mount; -a must restore its own row rather than infer its statistics.
+func TestFilesystemDuplicateMounts(t *testing.T) {
+	for _, flavor := range []string{"gnu-local", "busybox"} {
+		t.Run(flavor, func(t *testing.T) {
+			c, err := newFilesystemCollector(DefaultConfigs(), nil)
+			require.NoError(t, err)
+			in := filesystemProofInput(t, c, flavor, false)
+			metrics := filesystemMetrics(t, c, in)
+			for _, mount := range []string{"/proof/original", "/proof/duplicate"} {
+				found := false
+				for _, m := range metrics["node_filesystem_device_error"] {
+					for _, label := range m.Label {
+						if label.GetName() == "mountpoint" && label.GetValue() == mount {
+							found = true
+							require.Zero(t, m.GetGauge().GetValue(), mount)
+						}
+					}
+				}
+				require.True(t, found, mount)
+			}
+			require.Len(t, metrics["node_filesystem_size_bytes"], 2)
+		})
+	}
+}
+
+func TestFilesystemSourceSpaces(t *testing.T) {
+	for _, flavor := range []string{"gnu-local", "busybox"} {
+		t.Run(flavor, func(t *testing.T) {
+			c, err := newFilesystemCollector(DefaultConfigs(), nil)
+			require.NoError(t, err)
+			m := filesystemMetrics(t, c, filesystemProofInput(t, c, flavor, true))
+			require.Len(t, m["node_filesystem_size_bytes"], 1)
+			require.Equal(t, float64(2048*1024), m["node_filesystem_size_bytes"][0].GetGauge().GetValue())
+			labels := map[string]string{}
+			for _, label := range m["node_filesystem_size_bytes"][0].Label {
+				labels[label.GetName()] = label.GetValue()
+			}
+			require.Equal(t, map[string]string{"device": "source with spaces", "fstype": "tmpfs", "mountpoint": "/proof/space mount"}, labels)
+			require.Zero(t, m["node_filesystem_device_error"][0].GetGauge().GetValue())
+		})
+	}
+}
+
+func filesystemProofInput(t *testing.T, c agentless.Collector, flavor string, spaces bool) agentless.Input {
+	t.Helper()
+	in := agentless.Input{}
+	root := filepath.Join("testdata", "filesystem", flavor)
+	for j, read := range c.Reads()[:2] {
+		file := []string{"blocks", "inodes"}[j]
+		if !strings.Contains(read.Argv[1], "a") {
+			file = "legacy-" + file
+		}
+		data, err := os.ReadFile(filepath.Join(root, file))
+		require.NoError(t, err)
+		lines := strings.Split(string(data), "\n")
+		output := lines[0] + "\n"
+		for _, line := range lines[1:] {
+			if strings.Contains(line, "/proof/") && strings.Contains(line, "source with spaces") == spaces {
+				output += line + "\n"
+			}
+		}
+		in[read.ID] = agentless.Result{Read: read, Output: []byte(output)}
+	}
+	read := c.Reads()[2]
+	data, err := os.ReadFile(filepath.Join(root, "proc/self/mounts"))
+	require.NoError(t, err)
+	var mounts string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "/proof/") && strings.Contains(line, `source\040with\040spaces`) == spaces {
+			mounts += line + "\n"
+		}
+	}
+	in[read.ID] = agentless.Result{Read: read, Output: []byte(mounts)}
+	return in
 }
 
 func TestFilesystemDefaults(t *testing.T) {

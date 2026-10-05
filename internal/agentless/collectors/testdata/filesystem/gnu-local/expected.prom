@@ -1,4 +1,4 @@
-# Weaker self-authored golden from real busybox df output; not a node_exporter e2e oracle.
+# Weaker self-authored golden from real gnu-local df output; not a node_exporter e2e oracle.
 # df -akPT rounds to 1024-byte blocks; size/avail may differ from statfs by <1024 bytes,
 # and free=(size-used)*1024 may differ by <2048 bytes. Inodes are unscaled.
 # GNU lab output recorded read-only over SSH; local GNU and BusyBox 1.37 output recorded
@@ -14,17 +14,17 @@ node_filesystem_size_bytes{device="source",fstype="tmpfs",mountpoint="/proof/dup
 node_filesystem_size_bytes{device="source with spaces",fstype="tmpfs",mountpoint="/proof/space mount"} 2097152
 # HELP node_filesystem_avail_bytes Filesystem space available to non-root users in bytes.
 # TYPE node_filesystem_avail_bytes gauge
-node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 387735781376
-node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 387735781376
-node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 387735781376
+node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 387696513024
+node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 387696513024
+node_filesystem_avail_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 387696513024
 node_filesystem_avail_bytes{device="source",fstype="tmpfs",mountpoint="/proof/original"} 4194304
 node_filesystem_avail_bytes{device="source",fstype="tmpfs",mountpoint="/proof/duplicate"} 4194304
 node_filesystem_avail_bytes{device="source with spaces",fstype="tmpfs",mountpoint="/proof/space mount"} 2097152
 # HELP node_filesystem_free_bytes Filesystem free space in bytes.
 # TYPE node_filesystem_free_bytes gauge
-node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 387735781376
-node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 387735781376
-node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 387735781376
+node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/resolv.conf"} 387696513024
+node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hostname"} 387696513024
+node_filesystem_free_bytes{device="/dev/vdb1",fstype="btrfs",mountpoint="/etc/hosts"} 387696513024
 node_filesystem_free_bytes{device="source",fstype="tmpfs",mountpoint="/proof/original"} 4194304
 node_filesystem_free_bytes{device="source",fstype="tmpfs",mountpoint="/proof/duplicate"} 4194304
 node_filesystem_free_bytes{device="source with spaces",fstype="tmpfs",mountpoint="/proof/space mount"} 2097152

@@ -1,7 +1,9 @@
 # Weaker self-authored golden from real gnu df output; not a node_exporter e2e oracle.
-# df -kPT rounds to 1024-byte blocks; size/avail may differ from statfs by <1024 bytes,
+# df -akPT rounds to 1024-byte blocks; size/avail may differ from statfs by <1024 bytes,
 # and free=(size-used)*1024 may differ by <2048 bytes. Inodes are unscaled.
-# GNU recorded read-only over SSH; BusyBox 1.37 recorded in an invocation-owned local container.
+# GNU lab output recorded read-only over SSH; local GNU and BusyBox 1.37 output recorded
+# in invocation-owned containers with tmpfs source names containing spaces and a bind mount.
+# legacy-* preserves actual df output without -a for duplicate-mount regression proof.
 # HELP node_filesystem_size_bytes Filesystem size in bytes.
 # TYPE node_filesystem_size_bytes gauge
 node_filesystem_size_bytes{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 4143677440
@@ -10,13 +12,13 @@ node_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/tmp"} 6742
 node_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/user/1000"} 13484711936
 # HELP node_filesystem_avail_bytes Filesystem space available to non-root users in bytes.
 # TYPE node_filesystem_avail_bytes gauge
-node_filesystem_avail_bytes{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 3043446784
+node_filesystem_avail_bytes{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 3043405824
 node_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run"} 26969296896
 node_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/tmp"} 67423576064
 node_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/user/1000"} 13484707840
 # HELP node_filesystem_free_bytes Filesystem free space in bytes.
 # TYPE node_filesystem_free_bytes gauge
-node_filesystem_free_bytes{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 3274969088
+node_filesystem_free_bytes{device="/dev/mapper/pve-vm--107--disk--0",fstype="ext4",mountpoint="/"} 3274928128
 node_filesystem_free_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run"} 26969296896
 node_filesystem_free_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/tmp"} 67423576064
 node_filesystem_free_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/user/1000"} 13484707840

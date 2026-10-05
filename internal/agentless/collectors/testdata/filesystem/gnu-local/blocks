@@ -1,0 +1,15 @@
+Filesystem         Type    1024-blocks     Used Available Capacity Mounted on
+overlay            overlay   470614016 92004140 378609876      20% /
+proc               proc              0        0         0        - /proc
+tmpfs              tmpfs         65536        0     65536       0% /dev
+devpts             devpts            0        0         0        - /dev/pts
+sysfs              sysfs             0        0         0        - /sys
+cgroup             cgroup2           0        0         0        - /sys/fs/cgroup
+mqueue             mqueue            0        0         0        - /dev/mqueue
+shm                tmpfs      11290624        0  11290624       0% /dev/shm
+/dev/vdb1          btrfs     470614016 92004140 378609876      20% /etc/resolv.conf
+/dev/vdb1          btrfs     470614016 92004140 378609876      20% /etc/hostname
+/dev/vdb1          btrfs     470614016 92004140 378609876      20% /etc/hosts
+source             tmpfs          4096        0      4096       0% /proof/original
+source             tmpfs          4096        0      4096       0% /proof/duplicate
+source with spaces tmpfs          2048        0      2048       0% /proof/space mount
