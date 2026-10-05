@@ -108,7 +108,10 @@ func (p *Pool) acquire(ctx context.Context, target agentless.Target) (*connectio
 				}
 				err = errors.New("sshrunner: connection configuration was retired")
 			} else if err != nil {
-				p.failure(e, auth)
+				// A caller abandoning a scrape is not a target failure.
+				if contextLive(ctx) {
+					p.failure(e, auth)
+				}
 			} else {
 				e.client, e.raw = client, raw
 				e.retryAt = time.Time{}
@@ -131,6 +134,16 @@ func (p *Pool) acquire(ctx context.Context, target agentless.Target) (*connectio
 		case <-notify:
 		}
 	}
+}
+
+// A socket deadline can fire before the context timer's callback is scheduled.
+// Check the deadline too, so that race cannot misclassify an expired handshake.
+func contextLive(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	deadline, ok := ctx.Deadline()
+	return !ok || time.Now().Before(deadline)
 }
 
 func (p *Pool) dial(ctx context.Context, target agentless.Target, e *connection, cfg *settings) (*ssh.Client, net.Conn, bool, error) {
@@ -183,10 +196,11 @@ func (p *Pool) dial(ctx context.Context, target agentless.Target, e *connection,
 			return nil, nil, false, errors.New("sshrunner: host key algorithms do not match known_hosts")
 		}
 		// x/crypto has no exported authentication error type. Conservatively
-		// back off any failed handshake after verification, including servers
-		// that disconnect rather than returning an authentication rejection.
-		// Do not trust or expose server-controlled disconnect error strings.
-		auth := err != nil && hostVerified
+		// back off failed handshakes after verification while the dial context
+		// is live, including servers that disconnect rather than rejecting
+		// authentication. A dial timeout is a transport failure, not evidence
+		// of bad credentials. Do not expose server-controlled error strings.
+		auth := err != nil && hostVerified && contextLive(ctx)
 		if auth {
 			return nil, nil, true, errors.New("sshrunner: authentication failed")
 		}

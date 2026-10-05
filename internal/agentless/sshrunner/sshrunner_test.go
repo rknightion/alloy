@@ -44,6 +44,7 @@ type testServer struct {
 	mute      bool
 	silent    atomic.Bool
 	stallExec atomic.Bool
+	authDelay atomic.Duration
 }
 
 func signer(t *testing.T) (ssh.Signer, ed25519.PrivateKey) {
@@ -62,7 +63,11 @@ func serve(t *testing.T, address string, host ssh.Signer, password string, userK
 	s := &testServer{listener: l, conns: make(map[net.Conn]bool), commands: make(chan string, 50), mute: mute}
 	s.config = &ssh.ServerConfig{
 		PasswordCallback: func(meta ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+			delay := s.authDelay.Load()
 			s.auths.Add(1)
+			if delay > 0 {
+				time.Sleep(delay)
+			}
 			if meta.User() == "reader" && string(pass) == password {
 				return nil, nil
 			}
