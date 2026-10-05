@@ -47,18 +47,19 @@ func (c *blackholeConn) Write(p []byte) (int, error) {
 }
 
 type targetServer struct {
-	mu         sync.Mutex
-	listener   net.Listener
-	acceptDone chan struct{}
-	address    string
-	host       ssh.Signer
-	password   string
-	deny       bool
-	conns      map[*blackholeConn]bool
-	wg         sync.WaitGroup
-	auths      atomic.Int64
-	rejects    atomic.Int64
-	accepts    atomic.Int64
+	mu          sync.Mutex
+	listener    net.Listener
+	acceptDone  chan struct{}
+	address     string
+	host        ssh.Signer
+	password    string
+	deny        bool
+	lastFailure string
+	conns       map[*blackholeConn]bool
+	wg          sync.WaitGroup
+	auths       atomic.Int64
+	rejects     atomic.Int64
+	accepts     atomic.Int64
 }
 
 func newSigner() (ssh.Signer, error) {

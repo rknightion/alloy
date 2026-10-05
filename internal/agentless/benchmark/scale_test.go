@@ -138,6 +138,9 @@ func wave(p *sshrunner.Pool, farm []*targetServer) []*targetServer {
 				results, err := p.Run(ctx, agentless.Target{Address: s.address}, scaleReads)
 				cancel()
 				if !validResults(results, err) {
+					s.mu.Lock()
+					s.lastFailure = fmt.Sprintf("error=%v results=%+v", err, results)
+					s.mu.Unlock()
 					failed <- s
 				}
 			}
@@ -154,6 +157,16 @@ func wave(p *sshrunner.Pool, farm []*targetServer) []*targetServer {
 		result = append(result, s)
 	}
 	return result
+}
+
+func failureDetails(farm []*targetServer) []string {
+	var details []string
+	for _, s := range farm[:min(5, len(farm))] {
+		s.mu.Lock()
+		details = append(details, s.lastFailure)
+		s.mu.Unlock()
+	}
+	return details
 }
 
 func emit(tb testing.TB, value any) {
@@ -209,7 +222,7 @@ func recoverAll(b *testing.B, p *sshrunner.Pool, farm []*targetServer) {
 			return
 		}
 		if time.Now().After(deadline) {
-			b.Fatalf("capacity/recovery limit: %d/%d targets unrecovered in 45s (plus last bounded wave)", len(remaining), len(farm))
+			b.Fatalf("capacity/recovery limit: %d/%d targets unrecovered in 45s (plus last bounded wave): %v", len(remaining), len(farm), failureDetails(remaining))
 		}
 		time.Sleep(time.Second)
 	}
@@ -268,7 +281,7 @@ func BenchmarkSSHScale(b *testing.B) {
 		emit(b, map[string]any{"kind": "round", "round": round, "start_offset_seconds": began.Sub(start).Seconds(),
 			"duration_seconds": time.Since(began).Seconds(), "successes": len(farm) - len(failures), "failures": len(failures)})
 		if len(failures) != 0 {
-			b.Fatalf("capacity limit: %d/%d baseline targets failed", len(failures), len(farm))
+			b.Fatalf("capacity limit: %d/%d baseline targets failed: %v", len(failures), len(farm), failureDetails(failures))
 		}
 		sample := readResources("round_complete", farm, reg)
 		emit(b, sample)
