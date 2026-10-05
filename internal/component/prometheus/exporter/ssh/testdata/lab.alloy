@@ -21,7 +21,7 @@ prometheus.exporter.ssh "lab" {
 prometheus.scrape "lab" {
   targets         = prometheus.exporter.ssh.lab.targets
   forward_to      = []
-  scrape_interval = "5s"
+  scrape_interval = "15s"
 
   clustering {
     enabled = true
