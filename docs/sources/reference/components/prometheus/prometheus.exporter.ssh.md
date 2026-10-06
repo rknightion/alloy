@@ -15,7 +15,7 @@ Grafana Alloy runs compiled-in, read-only commands and reuses SSH connections be
 
 {{< docs/shared lookup="stability/experimental.md" source="alloy" version="<ALLOY_VERSION>" >}}
 
-Before you begin, provide an SSH account, credentials, and a verified OpenSSH `known_hosts` file.
+Before you begin, provide an SSH account, credentials, and verified OpenSSH `known_hosts` content.
 You can specify multiple `prometheus.exporter.ssh` components by giving them different labels.
 
 ## Usage
@@ -41,7 +41,8 @@ You can use the following arguments with `prometheus.exporter.ssh`:
 
 | Name | Type | Description | Default | Required |
 | ---- | ---- | ----------- | ------- | -------- |
-| `known_hosts_files` | `list(string)` | Paths to verified OpenSSH host key files. | | yes |
+| `known_hosts` | `secret` or `string` | Inline verified OpenSSH host key content. | | no |
+| `known_hosts_files` | `list(string)` | Paths to verified OpenSSH host key files. | | no |
 | `dial_timeout` | `duration` | Limit for TCP connection and SSH handshake. | `"5s"` | no |
 | `enabled_collectors` | `list(string)` | Names of collectors to enable. | | no |
 | `idle_timeout` | `duration` | Close connections unused for this duration. | `"5m"` | no |
@@ -53,8 +54,22 @@ You can use the following arguments with `prometheus.exporter.ssh`:
 | `timeout` | `duration` | Maximum duration of one SSH batch. | `"10s"` | no |
 
 Use either `target` blocks or the `targets` argument, not both.
-Discovery targets use `address` or `__address__` for the SSH destination and the `default` auth block for credentials.
-Discovery labels don't select credentials.
+Discovery targets use `address` or `__address__` for the SSH destination.
+The reserved `__param_auth` label selects an already declared `auth` block; an absent or empty value selects `default`.
+The ordinary `auth` discovery label isn't supported.
+The reserved `__param_collectors` label selects a comma-separated subset of the effective global collector list, without spaces or duplicate names.
+An absent or empty value selects the whole effective global list.
+An undefined auth name or invalid collector selector fails only that target's scrape with HTTP `503`; other targets remain usable.
+URL query parameters can't broaden this selection: supplied `auth` and `collectors` parameters must exactly match the configured selection or the handler returns HTTP `400`.
+
+Provide `known_hosts`, `known_hosts_files`, or both.
+The inline argument accepts a string or a secret-producing component's value (`OptionalSecret` in the implementation).
+Alloy combines inline content with all configured files into one trust snapshot.
+Inline content and each file have a `4 MiB` cap, and files must be regular files.
+Alloy polls files every `30s` and retires pooled connections when the trust snapshot changes, so subsequent connections verify against the new snapshot.
+Updates to inline content also replace trust through component configuration updates.
+A failed file reload retains the previous snapshot and increments `agentless_ssh_known_hosts_reload_failures_total`.
+Malformed-content diagnostics don't include the supplied host key content.
 
 An empty `enabled_collectors` list enables the default collectors: `cpu`, `diskstats`, `filesystem`, `loadavg`, `meminfo`, `netdev`, `os`, `stat`, and `uname`.
 Unknown or duplicate collector names cause a configuration error.
@@ -100,6 +115,15 @@ A trustworthy batch can contain individual failed, truncated, or timed-out reads
 The per-read output limit is `1 MiB`, and the aggregate output limit is `8 MiB`.
 Collectors report their own success separately; partial batch output doesn't necessarily fail the HTTP scrape.
 
+Each collector can emit at most `20,000` series and `500` metric families per scrape, with at most `4096` bytes per label value.
+Exceeding these limits or ending the scrape context sets `node_scrape_collector_success` to `0` and discards that collector's buffered samples.
+An ordinary collector error or panic also reports success `0`, but retains valid partial output that passes these checks.
+The `meminfo` parser limits retained fields to `500` before metric creation.
+The filesystem parser limits mounts to `10,000` and each `df` output to `10,000` data rows.
+The CPU parser accepts at most `8192` CPU lines, counting the aggregate line and duplicate lines, and CPU IDs up to `65535`.
+CPU counter state expires after one hour without a successful update for that target.
+Expiry runs during collector `Update` calls, including failed reads of other targets, not on a background timer; stopping all scrapes stops expiry.
+
 ## Blocks
 
 You can use the following blocks with `prometheus.exporter.ssh`:
@@ -127,6 +151,8 @@ Provide `private_key`, `password`, or both.
 The `passphrase` argument requires `private_key`.
 You can supply secrets from `local.file` with `is_secret = true` or from `remote.vault` exports.
 Host key verification is required; there's no option to disable it.
+Prefer private keys over passwords: a compromised but trusted SSH server receives any password you use to authenticate.
+Never share one password across targets.
 
 ### `diskstats`
 
@@ -185,7 +211,7 @@ The following fields are exported and can be referenced by other components:
 | ---- | ---- | ----------- |
 | `targets` | `list(map(string))` | Local exporter endpoints for each configured SSH destination. |
 
-Each exported target includes `__param_target` and an `instance` label set to the SSH destination, not the Alloy host.
+Each exported target includes `__param_target`, `__param_auth`, and `__param_collectors`, plus an `instance` label set to the SSH destination, not the Alloy host.
 Use these exports with `prometheus.scrape`; enable clustering on `prometheus.scrape` to distribute targets.
 
 ## Component health
@@ -208,6 +234,7 @@ The following Prometheus metrics are exposed:
 | `agentless_ssh_dials_total` | `counter` | Connection attempts, including trust checks before TCP connection. |
 | `agentless_ssh_dial_errors_total` | `counter` | Failed connection attempts by fixed `reason`: `auth`, `host_key`, `timeout`, `refused`, or `other`. |
 | `agentless_ssh_host_key_failures_total` | `counter` | Host key verification failures. |
+| `agentless_ssh_known_hosts_reload_failures_total` | `counter` | Failed trust reloads that retain the previous snapshot. |
 
 These pool metrics appear on Alloy's own metrics endpoint and aggregate all targets within the component.
 They don't use target, credential, auth-name, or raw-error labels, so target churn doesn't create retained per-target metric series.
@@ -219,7 +246,7 @@ Successful target scrape responses also contain the following metrics:
 | ---- | ---- | ----------- |
 | `agentless_ssh_up` | `gauge` | `1` when the batch returns trustworthy results. |
 | `agentless_ssh_scrape_duration_seconds` | `gauge` | Collection duration including the remote round trip, excluding HTTP delivery. |
-| `node_scrape_collector_success` | `gauge` | `1` when the collector update succeeds without a panic; otherwise `0`. Labeled by `collector`. |
+| `node_scrape_collector_success` | `gauge` | `1` when the update succeeds without a panic, output-policy rejection, or expired scrape context; otherwise `0`. Labeled by `collector`. |
 | `node_scrape_collector_duration_seconds` | `gauge` | Local collector update time only. Labeled by `collector`. |
 
 The scrape target supplies the `instance` label on these samples.
@@ -289,6 +316,66 @@ The relabel rule sets `job` to `integrations/node_exporter` for Linux integratio
 Ensure your verified host keys or host certificates match the addresses returned by discovery.
 Each cluster peer needs the same target discovery, credentials, and host trust configuration.
 Clustering belongs to `prometheus.scrape`, not `prometheus.exporter.ssh`.
+
+### Use a remotely managed pipeline
+
+For a remotely managed configuration, such as a Grafana Cloud Fleet Management pipeline, supply credentials through secret producers on each Alloy host.
+This example uses inline trust content and doesn't require the collector's `known_hosts_files` API:
+
+```alloy
+local.file "ssh_key" {
+	filename  = "<PRIVATE_KEY_FILE>"
+	is_secret = true
+}
+
+local.file "ssh_trust" {
+	filename  = "<VERIFIED_HOST_KEYS_FILE>"
+	is_secret = true
+}
+
+local.file "metrics_password" {
+	filename  = "<REMOTE_WRITE_PASSWORD_FILE>"
+	is_secret = true
+}
+
+prometheus.exporter.ssh "remote_hosts" {
+	known_hosts        = local.file.ssh_trust.content
+	enabled_collectors = ["cpu", "meminfo", "uname"]
+	targets = [{
+		"__address__"        = "<SSH_HOST>",
+		"__param_auth"       = "metrics",
+		"__param_collectors" = "cpu,meminfo",
+	}]
+
+	auth "metrics" {
+		username    = "<SSH_USERNAME>"
+		private_key = local.file.ssh_key.content
+	}
+}
+
+prometheus.scrape "remote_hosts" {
+	targets    = prometheus.exporter.ssh.remote_hosts.targets
+	forward_to = [prometheus.remote_write.metrics.receiver]
+}
+
+prometheus.remote_write "metrics" {
+	endpoint {
+		url = "<REMOTE_WRITE_URL>"
+
+		basic_auth {
+			username = "<REMOTE_WRITE_USERNAME>"
+			password = local.file.metrics_password.content
+		}
+	}
+}
+```
+
+Replace _`<PRIVATE_KEY_FILE>`_, _`<VERIFIED_HOST_KEYS_FILE>`_, and _`<REMOTE_WRITE_PASSWORD_FILE>`_ with protected files on each Alloy host.
+Replace _`<SSH_HOST>`_ and _`<SSH_USERNAME>`_ with your permitted Linux destination and unprivileged account.
+Replace _`<REMOTE_WRITE_URL>`_ and _`<REMOTE_WRITE_USERNAME>`_ with your metrics receiver's URL and account identifier.
+Enable experimental components on each Alloy host.
+Remote configuration distribution doesn't provision these files or verify metrics ingestion; verify delivery separately in your environment.
+You can also use Vault secret exports instead of local secret files, as in the following example.
 
 ### Read a private key from Vault
 

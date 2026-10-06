@@ -44,7 +44,8 @@ A stolen SSH key, or a compromised Alloy process that holds it, can execute arbi
 
 ## Verify host identity
 
-Supply verified OpenSSH host keys through `known_hosts_files`.
+Supply verified OpenSSH host keys through inline `known_hosts`, `known_hosts_files`, or both.
+Inline content can come from a secret producer, so remotely managed pipelines don't need the collector's file-based trust argument.
 The component requires host verification and doesn't offer an insecure bypass.
 Obtain fingerprints through a trusted administrative channel; collecting a key from the network alone doesn't establish trust.
 Match the entry to the destination Alloy uses, including discovery-returned IP addresses and non-default ports.
@@ -58,7 +59,13 @@ You can trust an SSH host certificate authority with an OpenSSH `@cert-authority
 Replace _`<HOST_PATTERN>`_ with the narrow host pattern you authorize and _`<HOST_CA_PUBLIC_KEY_BASE64>`_ with your verified host CA public key.
 Ensure the host certificate's principals match the configured destination.
 This verifies server host certificates; the component doesn't expose a client user-certificate argument.
-Protect host trust files from modification by untrusted users and plan host-key or CA rotation with your SSH administrators.
+Protect host trust sources from modification by untrusted users and plan host-key or CA rotation with your SSH administrators.
+Alloy combines inline content and files into one snapshot, polls files every `30s`, and retires pooled connections when trust changes.
+Each file must be a regular file no larger than `4 MiB`; inline content has the same size cap.
+A failed reload retains the old snapshot, logs a sanitized diagnostic, and increments `agentless_ssh_known_hosts_reload_failures_total`.
+Alert on this counter: removing a key from an invalid replacement file doesn't revoke the old trust snapshot.
+Verify that a valid replacement loads successfully before considering trust retired.
+Malformed-content diagnostics don't echo the supplied trust content.
 
 ## Protect credentials and configuration
 
@@ -67,6 +74,16 @@ For complete examples, refer to the [SSH exporter reference](../../reference/com
 Secret typing limits accidental disclosure through Alloy configuration surfaces; it doesn't protect credentials from a compromised Alloy host or process.
 Use filesystem permissions, Vault policy, and your operating system's isolation controls to protect the Alloy account.
 Rotate credentials and restrict who can modify discovery, permitted targets, trust files, and the configuration.
+
+Prefer private keys over passwords.
+Host verification prevents authentication to an untrusted server, but a compromised server with a trusted host key receives the password when you authenticate.
+Never share one password across targets: compromise of one trusted target could expose access to the others.
+Use separate credentials with narrowly scoped permissions.
+
+Discovery's reserved `__param_auth` label can select only a declared auth block.
+Its `__param_collectors` label can select only a comma-separated subset of the effective global collector list.
+An invalid selector fails that target, not the whole configuration; URL parameters can't broaden the configured selection.
+Protect discovery writers because they can select among these declared credentials and permitted collectors.
 
 The metrics handler permits only currently configured destinations.
 It rejects missing, repeated, or unknown `target` parameters with HTTP `400`.
@@ -102,9 +119,11 @@ The filesystem collector uses rounded `df` block values and retains zero inode c
 Some collector tests use real-output goldens rather than independent node_exporter oracle output.
 Refer to the [collector limitations](../../reference/components/prometheus/prometheus.exporter.ssh/#collectors) before relying on exact parity.
 
-Target discovery churn has a remaining resource risk: CPU counter state and pool target metadata can persist after targets disappear.
-Idle connections close, and pool metrics avoid per-target labels, but neither guarantees bounded metadata retention under unbounded destination churn.
-Limit the size and churn of discovered targets and monitor Alloy's memory use.
+The exporter limits each collector's series, families, and label values, and the parsers bound retained memory fields, filesystem rows, and CPU lines.
+Output-policy rejection discards that collector's buffered samples and reports `node_scrape_collector_success = 0`.
+Refer to the [collector limits](../../reference/components/prometheus/prometheus.exporter.ssh/#collectors) for exact bounds and partial-output behavior.
+CPU counter state expires after one hour without a successful target update, but cleanup runs only during collector updates, not on a background timer.
+Limit the size and churn of discovered targets and monitor Alloy's memory use; expiry isn't a hard bound under unbounded churn.
 
 ## Next steps
 
