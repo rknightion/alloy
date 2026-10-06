@@ -43,11 +43,11 @@ func TestVmstatRegistrationAndReads(t *testing.T) {
 		require.NoError(t, r.Validate())
 		require.Empty(t, r.Argv, "unprivileged fixed file read only")
 	}
-	require.NotContains(t, DefaultEnabled(), "vmstat")
+	require.Contains(t, DefaultEnabled(), "vmstat")
 	for _, r := range Registered() {
 		if r.Name == "vmstat" {
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 }

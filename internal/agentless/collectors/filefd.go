@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "filefd", OS: "linux", DefaultEnabled: false, Factory: newFilefdCollector})
+	Register(Registration{Name: "filefd", OS: "linux", DefaultEnabled: true, Factory: newFilefdCollector})
 }
 
 type filefdCollector struct{}

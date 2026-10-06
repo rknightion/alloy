@@ -55,11 +55,11 @@ func TestConntrackRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "conntrack", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "conntrack")
+	require.Contains(t, DefaultEnabled(), "conntrack")
 	for _, r := range Registered() {
 		if r.Name == "conntrack" {
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	expected := []agentless.Read{

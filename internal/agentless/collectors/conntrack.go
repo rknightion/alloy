@@ -27,7 +27,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "conntrack", OS: "linux", DefaultEnabled: false, Factory: newConntrackCollector})
+	Register(Registration{Name: "conntrack", OS: "linux", DefaultEnabled: true, Factory: newConntrackCollector})
 }
 
 // Names, help and gauge types match node_exporter's conntrack_linux.go.

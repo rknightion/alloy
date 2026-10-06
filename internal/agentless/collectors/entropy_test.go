@@ -24,11 +24,11 @@ func TestEntropyConformance(t *testing.T) {
 		require.Empty(t, read.Argv)
 	}
 	require.NoError(t, Validate([]string{"entropy"}))
-	require.NotContains(t, DefaultEnabled(), "entropy")
+	require.Contains(t, DefaultEnabled(), "entropy")
 	for _, r := range Registered() {
 		if r.Name == "entropy" {
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	conformance.Check(t, conformance.Case{Collector: c, Families: []string{"node_entropy_available_bits", "node_entropy_pool_size_bits"}, Root: "testdata/entropy"})

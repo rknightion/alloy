@@ -39,7 +39,7 @@ func TestNetstatRegistrationAndReads(t *testing.T) {
 	cs, err := Build([]string{"netstat"}, DefaultConfigs(), util.TestLogger(t))
 	require.NoError(t, err)
 	require.Equal(t, "netstat", cs[0].Name())
-	require.NotContains(t, DefaultEnabled(), "netstat")
+	require.Contains(t, DefaultEnabled(), "netstat")
 	for _, r := range Registered() {
 		if r.Name == "netstat" {
 			require.Equal(t, "linux", r.OS)

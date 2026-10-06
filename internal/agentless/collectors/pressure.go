@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "pressure", OS: "linux", DefaultEnabled: false, Factory: newPressureCollector})
+	Register(Registration{Name: "pressure", OS: "linux", DefaultEnabled: true, Factory: newPressureCollector})
 }
 
 type pressureCollector struct{}

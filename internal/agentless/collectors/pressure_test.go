@@ -41,7 +41,7 @@ func TestPressureRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "pressure", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "pressure")
+	require.Contains(t, DefaultEnabled(), "pressure")
 	require.Equal(t, []agentless.Read{agentless.FileRead("/proc/pressure/cpu"), agentless.FileRead("/proc/pressure/memory"), agentless.FileRead("/proc/pressure/io"), agentless.FileRead("/proc/pressure/irq")}, built[0].Reads())
 	for _, r := range built[0].Reads() {
 		require.NoError(t, r.Validate())

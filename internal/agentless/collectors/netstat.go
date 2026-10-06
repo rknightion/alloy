@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "netstat", OS: "linux", DefaultEnabled: false, Factory: newNetstatCollector})
+	Register(Registration{Name: "netstat", OS: "linux", DefaultEnabled: true, Factory: newNetstatCollector})
 }
 
 // Match node_exporter's default field selection. No configurable reads or filters.

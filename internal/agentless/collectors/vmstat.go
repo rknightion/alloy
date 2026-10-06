@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "vmstat", OS: "linux", DefaultEnabled: false, Factory: newVmstatCollector})
+	Register(Registration{Name: "vmstat", OS: "linux", DefaultEnabled: true, Factory: newVmstatCollector})
 }
 
 // Match node_exporter's default collector.vmstat.fields flag. No target field

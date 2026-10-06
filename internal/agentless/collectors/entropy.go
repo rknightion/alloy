@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "entropy", OS: "linux", DefaultEnabled: false, Factory: newEntropyCollector})
+	Register(Registration{Name: "entropy", OS: "linux", DefaultEnabled: true, Factory: newEntropyCollector})
 }
 
 type entropyCollector struct{}

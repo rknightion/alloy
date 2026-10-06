@@ -11,9 +11,9 @@ import (
 	"github.com/grafana/alloy/internal/util"
 )
 
-func TestDefaultEnabledCoversTheMVPCollectors(t *testing.T) {
+func TestDefaultEnabledCoversTheLandedCollectors(t *testing.T) {
 	require.Equal(t, []string{
-		"cpu", "diskstats", "filesystem", "loadavg", "meminfo", "netdev", "os", "stat", "uname",
+		"conntrack", "cpu", "diskstats", "entropy", "filefd", "filesystem", "loadavg", "meminfo", "netdev", "netstat", "os", "pressure", "stat", "uname", "vmstat",
 	}, collectors.DefaultEnabled())
 }
 
