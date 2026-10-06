@@ -1,0 +1,32 @@
+// Keep the credential at a producer reference: another secret-producing
+// component can replace local.file without changing the exporter API.
+local.file "credential" {
+  filename = @CREDENTIAL@
+  is_secret = true
+}
+
+prometheus.exporter.ssh "fleet" {
+  known_hosts = @TRUST@
+  enabled_collectors = @COLLECTORS@
+  timeout = "1s"
+  dial_timeout = "1s"
+  auth "selected" {
+    username = @USERNAME@
+    password = local.file.credential.content
+  }
+  targets = [{
+    "__address__" = @ADDRESS@,
+    "__param_auth" = "selected",
+    "__param_collectors" = @SELECTION@,
+    "environment" = @LABEL@,
+  }]
+  netdev {
+    device_include = @FILTER@
+  }
+  diskstats {
+    device_exclude = @FILTER@
+  }
+  filesystem {
+    mount_points_exclude = @FILTER@
+  }
+}
