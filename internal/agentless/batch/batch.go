@@ -15,6 +15,7 @@
 package batch
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -104,6 +105,7 @@ func Demux(ctx context.Context, r io.Reader, nonce string, reads []agentless.Rea
 		return nil, errors.New("batch: limits must be positive")
 	}
 	p := parser{nonce: nonce, limits: limits, results: make([]agentless.Result, len(reads))}
+	p.sectionMarkers()
 	for i, read := range reads {
 		p.results[i] = agentless.Result{Read: read, TimedOut: true}
 	}
@@ -163,6 +165,13 @@ type parser struct {
 	index, total, size int
 	active, payload    bool
 	line               []byte
+	begin, end         []byte
+}
+
+func (p *parser) sectionMarkers() {
+	prefix := p.nonce + ":" + strconv.Itoa(p.index) + ":"
+	p.begin = []byte(prefix + "begin\n")
+	p.end = []byte(prefix + "end:")
 }
 
 func (p *parser) append(b byte) {
@@ -184,22 +193,19 @@ func (p *parser) byte(b byte) error {
 		return nil
 	}
 	p.line = append(p.line, b)
-	prefix := fmt.Sprintf("%s:%d:", p.nonce, p.index)
 	if !p.active {
-		expected := prefix + "begin\n"
-		if !strings.HasPrefix(expected, string(p.line)) {
+		if !bytes.HasPrefix(p.begin, p.line) {
 			return errors.New("batch: malformed section start")
 		}
-		if len(p.line) == len(expected) {
+		if len(p.line) == len(p.begin) {
 			p.active = true
-			p.line = nil
+			p.line = p.line[:0]
 			p.size = 0
 		}
 		return nil
 	}
-	marker := prefix + "end:"
-	possible := strings.HasPrefix(marker, string(p.line)) || strings.HasPrefix(string(p.line), marker)
-	if possible && len(p.line) <= len(marker)+8 {
+	possible := bytes.HasPrefix(p.end, p.line) || bytes.HasPrefix(p.line, p.end)
+	if possible && len(p.line) <= len(p.end)+8 {
 		if b != '\n' {
 			return nil
 		}
@@ -220,14 +226,17 @@ func (p *parser) byte(b byte) error {
 		res.Truncated = p.size > p.limits.MaxSectionBytes
 		res.ExitStatus, res.NotExist, res.TimedOut = status, fields[4] == "1", false
 		p.index++
+		if p.index < len(p.results) {
+			p.sectionMarkers()
+		}
 		p.active = false
-		p.line = nil
+		p.line = p.line[:0]
 		return nil
 	}
 	for _, v := range p.line {
 		p.append(v)
 	}
-	p.line = nil
+	p.line = p.line[:0]
 	p.payload = b != '\n'
 	return nil
 }

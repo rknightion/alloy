@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -101,6 +102,23 @@ func TestLargeOutput(t *testing.T) {
 	for _, status := range []string{"256:0", "0:1", "1:2", "x:0"} {
 		_, err = Demux(context.Background(), strings.NewReader(testNonce+":0:begin\n\n"+testNonce+":0:end:"+status+"\n"), testNonce, reads, DefaultLimits)
 		require.Error(t, err)
+	}
+}
+
+func BenchmarkDemuxNewlines(b *testing.B) {
+	payload := bytes.Repeat([]byte{'\n'}, 8<<20)
+	output := []byte(testNonce + ":0:begin\n" + string(payload) + "\n" + testNonce + ":0:end:0:0\n")
+	reads := fixtureReads()[:1]
+	limits := Limits{MaxSectionBytes: DefaultLimits.MaxSectionBytes, MaxOutputBytes: len(output)}
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	for b.Loop() {
+		results, err := Demux(context.Background(), bytes.NewReader(output), testNonce, reads, limits)
+		require.NoError(b, err)
+		require.Len(b, results, 1)
+		require.Equal(b, payload[:limits.MaxSectionBytes], results[0].Output)
+		require.True(b, results[0].Truncated)
+		require.False(b, results[0].TimedOut)
 	}
 }
 
