@@ -17,6 +17,12 @@ func init() {
 	Register(Registration{Name: "meminfo", OS: "linux", DefaultEnabled: true, Factory: newMeminfoCollector})
 }
 
+// Meminfo validates a complete snapshot before sending any metrics, so the
+// Scraper cannot bound its pre-send state. Match the frozen central family cap.
+const maxMeminfoFields = 500
+
+var meminfoKeyNormalizer = strings.NewReplacer("(", "_", ")", "")
+
 type meminfoCollector struct{}
 
 func newMeminfoCollector(_ Configs, _ *slog.Logger) (agentless.Collector, error) {
@@ -49,7 +55,7 @@ func (c *meminfoCollector) Update(_ agentless.Target, in agentless.Input, ch cha
 			return fmt.Errorf("meminfo: malformed line %q", scanner.Text())
 		}
 		key := strings.TrimSuffix(fields[0], ":")
-		key = strings.NewReplacer("(", "_", ")", "").Replace(key)
+		key = meminfoKeyNormalizer.Replace(key)
 		if key == "" || !validMeminfoKey(key) {
 			return fmt.Errorf("meminfo: invalid field %q", fields[0])
 		}
@@ -67,6 +73,9 @@ func (c *meminfoCollector) Update(_ agentless.Target, in agentless.Input, ch cha
 		}
 		if seen[key] {
 			return fmt.Errorf("meminfo: duplicate field %s", key)
+		}
+		if len(seen) == maxMeminfoFields {
+			return fmt.Errorf("meminfo: field limit exceeded (%d)", maxMeminfoFields)
 		}
 		seen[key] = true
 		desc := prometheus.NewDesc(agentless.Namespace+"_memory_"+key, "Memory information field "+key+".", nil, nil)

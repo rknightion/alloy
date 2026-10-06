@@ -1,6 +1,7 @@
 package collectors
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -73,6 +74,63 @@ func TestMeminfoRejectsMalformed(t *testing.T) {
 			}
 			if len(ch) != 0 && output != "" {
 				t.Fatal("emitted partial metrics")
+			}
+		})
+	}
+}
+
+func TestMeminfoFamilyLimit(t *testing.T) {
+	// Match the Scraper's frozen 500-family limit, including the exact boundary.
+	for _, fields := range []int{499, 500, 501, 1000} {
+		t.Run(fmt.Sprint(fields), func(t *testing.T) {
+			var output strings.Builder
+			for i := 0; i < fields; i++ {
+				fmt.Fprintf(&output, "Field%d: 1 kB\n", i)
+			}
+			c := &meminfoCollector{}
+			read := c.Reads()[0]
+			ch := make(chan prometheus.Metric, fields)
+			err := c.Update(agentless.Target{}, agentless.Input{read.ID: {Read: read, Output: []byte(output.String())}}, ch)
+			if fields > 500 {
+				if err == nil || !strings.Contains(err.Error(), "field limit exceeded") {
+					t.Fatalf("expected pre-retention field limit error, got %v", err)
+				}
+				if len(ch) != 0 {
+					t.Fatalf("emitted %d metrics from rejected snapshot", len(ch))
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(ch) != fields {
+					t.Fatalf("emitted %d metrics, want %d", len(ch), fields)
+				}
+			}
+		})
+	}
+}
+
+func TestMeminfoValidatesFullBoundedSnapshot(t *testing.T) {
+	var prefix strings.Builder
+	for i := 0; i < 499; i++ {
+		fmt.Fprintf(&prefix, "Field%d: 1\n", i)
+	}
+	for _, tail := range []string{
+		"Active(anon): 1 kB\nActive_anon: 2 kB\n",
+		"Field499: 1\ngarbage\n",
+		"Field499: 1\nField499: 2\n",
+		"Field499: 1\n" + strings.Repeat("x", 70000),
+	} {
+		t.Run(tail[:min(len(tail), 40)], func(t *testing.T) {
+			c := &meminfoCollector{}
+			read := c.Reads()[0]
+			ch := make(chan prometheus.Metric, 501)
+			err := c.Update(agentless.Target{}, agentless.Input{read.ID: {Read: read, Output: []byte(prefix.String() + tail)}}, ch)
+			if err == nil {
+				t.Fatal("accepted invalid snapshot at field boundary")
+			}
+			if len(ch) != 0 {
+				t.Fatal("emitted partial metrics before validating snapshot")
 			}
 		})
 	}

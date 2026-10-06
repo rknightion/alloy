@@ -141,11 +141,14 @@ func (c *Component) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "exactly one configured target is required", http.StatusBadRequest)
 		return
 	}
-	metrics, status, err := c.collect(r, params[0])
+	metrics, cancel, status, err := c.collect(r, params[0])
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
 	}
+	// Collectors run lazily during Gather, so retain the deadline context
+	// through HTTP collection rather than cancelling after the SSH batch.
+	defer cancel()
 	// Metrics are immutable after collection. Never retain the configuration
 	// lock during HTTP delivery: a stalled client must not block revocation.
 	registry := prometheus.NewRegistry()
@@ -156,20 +159,19 @@ func (c *Component) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	promhttp.HandlerFor(registry, promhttp.HandlerOpts{ErrorHandling: promhttp.ContinueOnError}).ServeHTTP(w, r)
 }
 
-func (c *Component) collect(r *http.Request, address string) (prometheus.Collector, int, error) {
+func (c *Component) collect(r *http.Request, address string) (prometheus.Collector, context.CancelFunc, int, error) {
 	// Serialize collection with credential updates, but not response writes.
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	target, ok := c.allowed[address]
 	if !ok {
-		return nil, http.StatusBadRequest, fmt.Errorf("unknown target")
+		return nil, nil, http.StatusBadRequest, fmt.Errorf("unknown target")
 	}
 	timeout, err := scrapeTimeout(r.Header.Get("X-Prometheus-Scrape-Timeout-Seconds"), c.timeout)
 	if err != nil {
-		return nil, http.StatusBadRequest, err
+		return nil, nil, http.StatusBadRequest, err
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
 	started := time.Now()
 	metrics, err := c.scraper.Scrape(ctx, target)
 	if err != nil {
@@ -177,9 +179,10 @@ func (c *Component) collect(r *http.Request, address string) (prometheus.Collect
 		// and scrape_duration_seconds observe failures; do not depend on
 		// non-ingestible health samples in the rejected response body.
 		// Never expose server-controlled or credential-bearing errors.
-		return nil, http.StatusServiceUnavailable, fmt.Errorf("SSH scrape failed")
+		cancel()
+		return nil, nil, http.StatusServiceUnavailable, fmt.Errorf("SSH scrape failed")
 	}
-	return &scrapeMetrics{node: metrics, up: 1, duration: time.Since(started)}, http.StatusOK, nil
+	return &scrapeMetrics{node: metrics, up: 1, duration: time.Since(started)}, cancel, http.StatusOK, nil
 }
 
 func scrapeTimeout(header string, cap time.Duration) (time.Duration, error) {

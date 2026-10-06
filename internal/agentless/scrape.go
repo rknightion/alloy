@@ -4,14 +4,25 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // Namespace is the metric namespace of every collector, matching
 // node_exporter so that existing dashboards and alerts work unchanged.
 const Namespace = "node"
+
+// Limits apply to each collector independently, before Gather can materialize
+// target-controlled output. Keep the Collector interface independent of policy.
+const (
+	maxCollectorSeries   = 20000
+	maxCollectorFamilies = 500
+	maxLabelValueBytes   = 4096
+)
 
 var (
 	scrapeDurationDesc = prometheus.NewDesc(
@@ -69,7 +80,8 @@ func (s *Scraper) Reads() []Read { return s.reads }
 // scraper's up metric reports the target as down.
 //
 // The returned collector emits, per collector, node_scrape_collector_success
-// (1 when Update returned nil without panicking) and
+// (1 when Update returned nil without panicking, exceeding output limits or
+// ending the scrape context) and
 // node_scrape_collector_duration_seconds (the time spent in Update, which
 // excludes the remote round trip shared by the whole batch). Serve it with
 // promhttp's ContinueOnError so that one bad series does not fail the scrape.
@@ -88,10 +100,11 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 		}
 		in[res.Read.ID] = res
 	}
-	return &scrapeResult{collectors: s.collectors, in: in, target: target, logger: s.logger}, nil
+	return &scrapeResult{ctx: ctx, collectors: s.collectors, in: in, target: target, logger: s.logger}, nil
 }
 
 type scrapeResult struct {
+	ctx        context.Context
 	collectors []Collector
 	in         Input
 	target     Target
@@ -106,17 +119,128 @@ func (r *scrapeResult) Describe(chan<- *prometheus.Desc) {}
 func (r *scrapeResult) Collect(ch chan<- prometheus.Metric) {
 	for _, c := range r.collectors {
 		start := time.Now()
-		err := r.update(c, ch)
+		metrics, err := r.buffer(c)
+		for _, m := range metrics {
+			ch <- m
+		}
 		duration := time.Since(start)
 
 		success := 1.0
 		if err != nil {
 			success = 0
-			r.logger.Debug("collector failed", "target", r.target.Address, "collector", c.Name(), "err", err)
+			if r.logger != nil {
+				r.logger.Debug("collector failed", "target", r.target.Address, "collector", c.Name(), "err", err)
+			}
 		}
 		ch <- prometheus.MustNewConstMetric(scrapeDurationDesc, prometheus.GaugeValue, duration.Seconds(), c.Name())
 		ch <- prometheus.MustNewConstMetric(scrapeSuccessDesc, prometheus.GaugeValue, success, c.Name())
 	}
+}
+
+// bufferedMetric exports the same serialized metric that was checked, without
+// retaining any producer-owned state or calling its Write method again.
+type bufferedMetric struct {
+	desc   *prometheus.Desc
+	metric *dto.Metric
+}
+
+func (m bufferedMetric) Desc() *prometheus.Desc { return m.desc }
+func (m bufferedMetric) Write(out *dto.Metric) error {
+	// Copy only exported payload fields, not protobuf's internal mutex/state.
+	out.Label = m.metric.Label
+	out.Gauge = m.metric.Gauge
+	out.Counter = m.metric.Counter
+	out.Summary = m.metric.Summary
+	out.Untyped = m.metric.Untyped
+	out.Histogram = m.metric.Histogram
+	out.TimestampMs = m.metric.TimestampMs
+	return nil
+}
+
+// buffer runs the producer with an unbuffered channel. Once rejected, output is
+// drained without serialization or retention, so a finite producer always exits.
+// The frozen Collector interface cannot interrupt an Update already in progress.
+func (r *scrapeResult) buffer(c Collector) ([]prometheus.Metric, error) {
+	if err := r.ctx.Err(); err != nil {
+		return nil, err
+	}
+	ch := make(chan prometheus.Metric)
+	done := make(chan error, 1)
+	go func() {
+		done <- r.update(c, ch)
+		close(ch)
+	}()
+	var metrics []prometheus.Metric
+	families := make(map[string]struct{})
+	var err error
+	for m := range ch {
+		if err == nil {
+			err = r.ctx.Err()
+		}
+		if err == nil && len(metrics) == maxCollectorSeries {
+			err = fmt.Errorf("collector series limit exceeded")
+		}
+		if err == nil {
+			var checked bufferedMetric
+			var family string
+			checked, family, err = checkMetric(m)
+			if err == nil {
+				families[family] = struct{}{}
+				if len(families) > maxCollectorFamilies {
+					err = fmt.Errorf("collector family limit exceeded")
+				} else {
+					metrics = append(metrics, checked)
+				}
+			}
+		}
+		if err != nil {
+			metrics = nil
+		}
+	}
+	updateErr := <-done
+	if err == nil {
+		err = r.ctx.Err()
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Preserve valid partial output on an ordinary producer error or panic,
+	// as required by Collector. Policy rejection discards the whole buffer.
+	return metrics, updateErr
+}
+
+// checkMetric checks all labels, including const labels. Desc's public String
+// representation supplies the family name; the descriptor's full string also
+// includes label names and const values and is not a family identity.
+func checkMetric(m prometheus.Metric) (checked bufferedMetric, family string, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("metric panicked: %v", p)
+		}
+	}()
+	checked.desc = m.Desc()
+	name, ok := strings.CutPrefix(checked.desc.String(), `Desc{fqName: `)
+	if !ok {
+		return checked, "", fmt.Errorf("invalid metric descriptor")
+	}
+	quoted, err := strconv.QuotedPrefix(name)
+	if err != nil {
+		return checked, "", fmt.Errorf("invalid metric family: %w", err)
+	}
+	family, err = strconv.Unquote(quoted)
+	if err != nil {
+		return checked, "", fmt.Errorf("invalid metric family: %w", err)
+	}
+	checked.metric = &dto.Metric{}
+	if err = m.Write(checked.metric); err != nil {
+		return checked, family, err
+	}
+	for _, label := range checked.metric.Label {
+		if len(label.GetValue()) > maxLabelValueBytes {
+			return checked, family, fmt.Errorf("collector label value limit exceeded")
+		}
+	}
+	return checked, family, nil
 }
 
 // update runs one collector, turning a panic into an error so that output a
