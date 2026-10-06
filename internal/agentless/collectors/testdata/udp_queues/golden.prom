@@ -1,0 +1,4 @@
+# HELP node_udp_queues Number of allocated memory in the kernel for UDP datagrams in bytes.
+# TYPE node_udp_queues gauge
+node_udp_queues{ip="v4",queue="rx"} 0
+node_udp_queues{ip="v4",queue="tx"} 21
