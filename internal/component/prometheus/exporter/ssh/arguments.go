@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grafana/alloy/internal/agentless"
 	"github.com/grafana/alloy/internal/agentless/collectors"
 	"github.com/grafana/alloy/internal/agentless/sshrunner"
 	"github.com/grafana/alloy/internal/component/discovery"
@@ -104,6 +105,11 @@ func (a Arguments) poolConfig() sshrunner.Config {
 		cfg.Auths[auth.Name] = sshrunner.Auth{Username: auth.Username, PrivateKey: []byte(auth.PrivateKey), Passphrase: []byte(auth.Passphrase), Password: []byte(auth.Password)}
 	}
 	cfg.KnownHostsFiles = a.KnownHostsFiles
+	targets := a.targets()
+	cfg.Targets = make([]agentless.Target, 0, len(targets))
+	for _, target := range targets {
+		cfg.Targets = append(cfg.Targets, agentless.Target{Address: target.Address, Auth: target.Auth})
+	}
 	cfg.Timeout, cfg.DialTimeout = a.Timeout, a.DialTimeout
 	cfg.MaxSessionsPerTarget, cfg.MaxConcurrentDials = a.MaxSessionsPerTarget, a.MaxConcurrentDials
 	cfg.IdleTimeout, cfg.KeepaliveInterval, cfg.KeepaliveTimeout = a.IdleTimeout, a.KeepaliveInterval, a.KeepaliveTimeout

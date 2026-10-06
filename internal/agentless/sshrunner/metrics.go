@@ -13,11 +13,12 @@ const (
 // Pool metrics are component-wide aggregates. No series is keyed by target,
 // auth selection, credentials or remote error text, including retired entries.
 type poolMetrics struct {
-	open         prometheus.GaugeFunc
-	sessions     prometheus.Gauge
-	dials        prometheus.Counter
-	errors       *prometheus.CounterVec
-	hostFailures prometheus.Counter
+	open           prometheus.GaugeFunc
+	sessions       prometheus.Gauge
+	dials          prometheus.Counter
+	errors         *prometheus.CounterVec
+	hostFailures   prometheus.Counter
+	reloadFailures prometheus.Counter
 }
 
 func newPoolMetrics(p *Pool) *poolMetrics {
@@ -37,6 +38,9 @@ func newPoolMetrics(p *Pool) *poolMetrics {
 		dials:        prometheus.NewCounter(prometheus.CounterOpts{Name: "agentless_ssh_dials_total", Help: "SSH connection attempts, including trust checks before TCP connection."}),
 		errors:       prometheus.NewCounterVec(prometheus.CounterOpts{Name: "agentless_ssh_dial_errors_total", Help: "Failed SSH connection attempts by bounded reason."}, []string{"reason"}),
 		hostFailures: p.hostFailures,
+		reloadFailures: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "agentless_ssh_known_hosts_reload_failures_total", Help: "Failed known_hosts reloads that retained the previous trust snapshot.",
+		}),
 	}
 	// Pre-create only this fixed vocabulary. Unknown transport failures are not
 	// forced into one of the actionable classes or labelled with raw error text.
@@ -47,13 +51,13 @@ func newPoolMetrics(p *Pool) *poolMetrics {
 }
 
 func (m *poolMetrics) Describe(ch chan<- *prometheus.Desc) {
-	for _, c := range []prometheus.Collector{m.open, m.sessions, m.dials, m.errors, m.hostFailures} {
+	for _, c := range []prometheus.Collector{m.open, m.sessions, m.dials, m.errors, m.hostFailures, m.reloadFailures} {
 		c.Describe(ch)
 	}
 }
 
 func (m *poolMetrics) Collect(ch chan<- prometheus.Metric) {
-	for _, c := range []prometheus.Collector{m.open, m.sessions, m.dials, m.errors, m.hostFailures} {
+	for _, c := range []prometheus.Collector{m.open, m.sessions, m.dials, m.errors, m.hostFailures, m.reloadFailures} {
 		c.Collect(ch)
 	}
 }

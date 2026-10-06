@@ -120,7 +120,7 @@ func TestDialErrorMetrics(t *testing.T) {
 			require.Equal(t, float64(1), values["agentless_ssh_dial_errors_total/"+reason])
 			require.Zero(t, values["agentless_ssh_open_connections"])
 			require.Zero(t, values["agentless_ssh_sessions_in_use"])
-			require.Len(t, values, 9, "fixed five reason series plus four pool metrics regardless of target or error text")
+			require.Len(t, values, 10, "fixed five reason series plus five pool metrics regardless of target or error text")
 		})
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"reflect"
@@ -13,11 +14,18 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/grafana/alloy/internal/agentless"
 )
 
 type settings struct {
 	Config
-	methods   map[string][]ssh.AuthMethod
+	methods map[string][]ssh.AuthMethod
+	targets map[agentless.Target]struct{}
+	*hostKeys
+}
+
+type hostKeys struct {
 	trust     [32]byte
 	verify    ssh.HostKeyCallback
 	certLines map[int]bool
@@ -59,6 +67,21 @@ func prepare(cfg Config) (*settings, error) {
 	}
 	cfg.Auths = auths
 	cfg.KnownHostsFiles = append([]string(nil), cfg.KnownHostsFiles...)
+	var targets map[agentless.Target]struct{}
+	if cfg.Targets != nil {
+		cfg.Targets = append([]agentless.Target{}, cfg.Targets...)
+		targets = make(map[agentless.Target]struct{}, len(cfg.Targets))
+		for _, target := range cfg.Targets {
+			target, err := normalizeTarget(target)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := auths[target.Auth]; !ok {
+				return nil, errors.New("sshrunner: target selects an undefined auth")
+			}
+			targets[target] = struct{}{}
+		}
+	}
 	for _, pair := range [][2]*time.Duration{
 		{&cfg.DialTimeout, &DefaultConfig.DialTimeout}, {&cfg.Timeout, &DefaultConfig.Timeout},
 		{&cfg.KeepaliveInterval, &DefaultConfig.KeepaliveInterval}, {&cfg.KeepaliveTimeout, &DefaultConfig.KeepaliveTimeout},
@@ -91,18 +114,74 @@ func prepare(cfg Config) (*settings, error) {
 	if len(cfg.KnownHostsFiles) == 0 {
 		return nil, errors.New("sshrunner: known_hosts files are required")
 	}
-	// Parse a private snapshot rather than reading the original files twice.
-	// This binds verification, algorithm selection and Update's fingerprint to
-	// exactly the same bytes, including when a file is atomically replaced.
+	contents, err := readKnownHosts(cfg.KnownHostsFiles)
+	if err != nil {
+		return nil, err
+	}
+	keys, err := parseKnownHosts(contents)
+	if err != nil {
+		return nil, err
+	}
+	return &settings{Config: cfg, methods: methods, targets: targets, hostKeys: keys}, nil
+}
+
+const maxKnownHostsBytes = 4 << 20
+
+func readKnownHosts(files []string) ([]byte, error) {
 	var contents []byte
-	for _, name := range cfg.KnownHostsFiles {
-		data, err := os.ReadFile(name)
+	for _, name := range files {
+		data, err := readKnownHostsFile(name)
 		if err != nil {
 			return nil, fmt.Errorf("sshrunner: read known_hosts: %w", err)
 		}
 		contents = append(contents, data...)
 		contents = append(contents, '\n')
 	}
+	return contents, nil
+}
+
+func readKnownHostsFile(name string) ([]byte, error) {
+	// Reject devices before opening them. Nonblocking open also handles a
+	// regular file replaced with a FIFO between Stat and Open.
+	info, err := os.Stat(name)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("known_hosts must be a regular file")
+	}
+	if info.Size() > maxKnownHostsBytes {
+		return nil, errors.New("known_hosts exceeds 4 MiB")
+	}
+	f, err := openKnownHosts(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err = f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("known_hosts must be a regular file")
+	}
+	if info.Size() > maxKnownHostsBytes {
+		return nil, errors.New("known_hosts exceeds 4 MiB")
+	}
+	// Bound reads even if an opened regular file grows after Stat.
+	data, err := io.ReadAll(io.LimitReader(f, maxKnownHostsBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxKnownHostsBytes {
+		return nil, errors.New("known_hosts exceeds 4 MiB")
+	}
+	return data, nil
+}
+
+func parseKnownHosts(contents []byte) (*hostKeys, error) {
+	// Verification, algorithm selection and the fingerprint all use the same
+	// private snapshot, including when a source file is atomically replaced.
 	f, err := os.CreateTemp("", "alloy-ssh-known-hosts-*")
 	if err != nil {
 		return nil, err
@@ -123,7 +202,15 @@ func prepare(cfg Config) (*settings, error) {
 	for i, line := range strings.Split(string(contents), "\n") {
 		certLines[i+1] = strings.HasPrefix(strings.TrimSpace(line), "@cert-authority ") || strings.HasPrefix(strings.TrimSpace(line), "@cert-authority\t")
 	}
-	return &settings{Config: cfg, methods: methods, trust: sha256.Sum256(contents), verify: verify, certLines: certLines}, nil
+	return &hostKeys{trust: sha256.Sum256(contents), verify: verify, certLines: certLines}, nil
+}
+
+func (s *settings) permits(target agentless.Target) bool {
+	if s.targets == nil {
+		return true
+	}
+	_, ok := s.targets[target]
+	return ok
 }
 
 // A deliberately unmatched key asks the knownhosts parser for all matching

@@ -71,6 +71,10 @@ func (p *Pool) acquire(ctx context.Context, target agentless.Target) (*connectio
 			return nil, nil, nil, err
 		}
 		cfg := p.cfg
+		if !cfg.permits(target) {
+			p.mu.Unlock()
+			return nil, nil, nil, errors.New("sshrunner: target is not configured")
+		}
 		if _, ok := cfg.Auths[target.Auth]; !ok {
 			p.mu.Unlock()
 			return nil, nil, nil, errors.New("sshrunner: unknown auth selection")

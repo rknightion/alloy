@@ -6,6 +6,7 @@ package sshrunner
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"log/slog"
@@ -50,6 +51,10 @@ type Config struct {
 	// derived from the known_hosts entries for the target (golang/go#29286),
 	// or a host with several key types fails verification.
 	KnownHostsFiles []string
+	// Targets lists permitted destinations. Nil allows any target; a non-nil
+	// empty slice allows none. Update retires connections removed from this
+	// list. Addresses and auth selections use the same defaults as Run.
+	Targets []agentless.Target
 
 	// DialTimeout bounds TCP connect plus the SSH handshake.
 	DialTimeout time.Duration
@@ -114,6 +119,9 @@ type Pool struct {
 	dials        int
 	hostFailures prometheus.Counter
 	metrics      *poolMetrics
+	logger       *slog.Logger
+	stopReload   chan struct{}
+	reloadDone   chan struct{}
 }
 
 // All mutable connection fields are guarded by Pool.mu. Network operations
@@ -139,7 +147,10 @@ func New(cfg Config, logger *slog.Logger, reg prometheus.Registerer) (*Pool, err
 	if err != nil {
 		return nil, err
 	}
-	p := &Pool{cfg: s, entries: make(map[agentless.Target]*connection), notify: make(chan struct{}), hostFailures: prometheus.NewCounter(prometheus.CounterOpts{
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	p := &Pool{cfg: s, logger: logger, stopReload: make(chan struct{}), reloadDone: make(chan struct{}), entries: make(map[agentless.Target]*connection), notify: make(chan struct{}), hostFailures: prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "agentless_ssh_host_key_failures_total", Help: "SSH handshakes rejected by mandatory host key verification.",
 	})}
 	p.metrics = newPoolMetrics(p)
@@ -149,30 +160,112 @@ func New(cfg Config, logger *slog.Logger, reg prometheus.Registerer) (*Pool, err
 		}
 	}
 	// No credential or server-controlled handshake error is ever logged.
+	go p.watchKnownHosts()
 	return p, nil
 }
 
 // Update applies a new configuration. Connections whose target, credentials
 // and known_hosts are unchanged stay open; others are closed.
 func (p *Pool) Update(cfg Config) error {
-	s, err := prepare(cfg)
-	if err != nil {
-		return err
+	return p.update(cfg, prepare)
+}
+
+func (p *Pool) update(cfg Config, prepareConfig func(Config) (*settings, error)) error {
+	for {
+		p.mu.Lock()
+		if p.closed {
+			p.mu.Unlock()
+			return errors.New("sshrunner: pool is closed")
+		}
+		previous := p.cfg
+		p.mu.Unlock()
+
+		s, err := prepareConfig(cfg)
+		if err != nil {
+			return err
+		}
+		p.mu.Lock()
+		if p.closed {
+			p.mu.Unlock()
+			return errors.New("sshrunner: pool is closed")
+		}
+		// A reload or another Update may have published newer trust while
+		// these files were read. Re-read rather than resurrecting that older
+		// snapshot. File I/O stays outside the connection-state lock.
+		if p.cfg != previous {
+			p.mu.Unlock()
+			continue
+		}
+		for target, e := range p.entries {
+			if _, ok := s.Auths[target.Auth]; !ok || !s.permits(target) || !sameIdentity(p.cfg, s, target.Auth) {
+				p.retire(e)
+				delete(p.entries, target)
+			}
+		}
+		p.cfg = s
+		p.signal()
+		p.mu.Unlock()
+		return nil
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return errors.New("sshrunner: pool is closed")
-	}
-	for target, e := range p.entries {
-		if _, ok := s.Auths[target.Auth]; !ok || !sameIdentity(p.cfg, s, target.Auth) {
-			p.retire(e)
-			delete(p.entries, target)
+}
+
+const knownHostsReloadInterval = 30 * time.Second
+
+func (p *Pool) watchKnownHosts() {
+	defer close(p.reloadDone)
+	ticker := time.NewTicker(knownHostsReloadInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.stopReload:
+			return
+		case <-ticker.C:
+			p.reloadKnownHosts()
 		}
 	}
-	p.cfg = s
+}
+
+func (p *Pool) reloadKnownHosts() {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	previous := p.cfg
+	p.mu.Unlock()
+
+	contents, err := readKnownHosts(previous.KnownHostsFiles)
+	var keys *hostKeys
+	if err == nil {
+		if sha256.Sum256(contents) == previous.trust {
+			return
+		}
+		keys, err = parseKnownHosts(contents)
+	}
+	p.mu.Lock()
+	// An Update, Close or another reload wins over this older read. Never
+	// replace its credentials, membership or trust with a stale snapshot.
+	if p.closed || p.cfg != previous {
+		p.mu.Unlock()
+		return
+	}
+	if err != nil {
+		p.metrics.reloadFailures.Inc()
+		p.mu.Unlock()
+		// Parser errors can contain attacker-controlled file contents. Log only
+		// a fixed diagnostic, with no path, target or credential information.
+		p.logger.Error("sshrunner: known_hosts reload failed; retaining previous snapshot")
+		return
+	}
+	next := *previous
+	next.hostKeys = keys
+	for target, e := range p.entries {
+		p.retire(e)
+		delete(p.entries, target)
+	}
+	p.cfg = &next
 	p.signal()
-	return nil
+	p.mu.Unlock()
 }
 
 // Run implements agentless.Runner.
@@ -251,6 +344,7 @@ func (p *Pool) Close() error {
 	defer p.mu.Unlock()
 	if !p.closed {
 		p.closed = true
+		close(p.stopReload)
 		for target, e := range p.entries {
 			p.retire(e)
 			delete(p.entries, target)
