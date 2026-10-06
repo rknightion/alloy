@@ -33,6 +33,8 @@ record for each nonempty conntrack statistics line. The retained records survive
 so the unchanged heap assertion must reject it. No production seam is edited.
 
 ```sh
+# Match the physical source path used by the overlay, including macOS /tmp symlinks.
+cd "$(pwd -P)"
 mkdir -p /tmp/alloy-loop5-hostile
 python3 - "$PWD" <<'PY'
 import json
