@@ -40,13 +40,13 @@ func TestNFSRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "nfs", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "nfs")
+	require.Contains(t, DefaultEnabled(), "nfs")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "nfs" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

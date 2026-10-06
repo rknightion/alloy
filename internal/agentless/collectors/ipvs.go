@@ -16,7 +16,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "ipvs", OS: "linux", DefaultEnabled: false, Factory: newIPVSCollector})
+	Register(Registration{Name: "ipvs", OS: "linux", DefaultEnabled: true, Factory: newIPVSCollector})
 }
 
 // Five global counters plus three series per backend fit the frozen 20000

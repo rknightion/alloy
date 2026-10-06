@@ -14,7 +14,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "nfs", OS: "linux", DefaultEnabled: false, Factory: newNFSCollector})
+	Register(Registration{Name: "nfs", OS: "linux", DefaultEnabled: true, Factory: newNFSCollector})
 }
 
 type nfsCollector struct{ descs [6]*prometheus.Desc }

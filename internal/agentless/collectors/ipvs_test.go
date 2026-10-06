@@ -48,11 +48,11 @@ func TestIPVSRegistration(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "ipvs", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "ipvs")
+	require.Contains(t, DefaultEnabled(), "ipvs")
 	for _, r := range Registered() {
 		if r.Name == "ipvs" {
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.Equal(t, []agentless.Read{agentless.FileRead("/proc/net/ip_vs_stats"), agentless.FileRead("/proc/net/ip_vs")}, built[0].Reads())

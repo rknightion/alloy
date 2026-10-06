@@ -127,6 +127,8 @@ func TestHostileDefaultCollectorsHeap(t *testing.T) {
 	const conntrackRow = "1 0 1 0 1 1 0 0 1 1 1 1 0 0 0 0 1\n"
 	const udpHeader = "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
 	const udpRow = "0: 00000000:0016 00000000:0000 0A 00000015:00000002 00:00000000 00000000 0 0 2740 1 ffff88003d3af3c0 100\n"
+	const ipvsHeader = "IP Virtual Server version 1.2.1 (size=4096)\nProt LocalAddress:Port Scheduler Flags\n  -> RemoteAddress:Port Forward Weight ActiveConn InActConn\nTCP 7F000001:0050 rr\n"
+	const ipvsBackend = "  -> 7F000002:0050 Masq 1 2 3\n"
 	const psi = "some avg10=0 avg60=0 avg300=0 total=1\nfull avg10=0 avg60=0 avg300=0 total=1\n"
 	fixtures := map[string]fixture{
 		"file:/proc/stat":                                 {valid: "cpu 0 0 0 0\ncpu0 1\n"},
@@ -142,6 +144,9 @@ func TestHostileDefaultCollectorsHeap(t *testing.T) {
 		"file:/proc/sys/kernel/random/entropy_avail":      {"1\n", "1\n", "\n", 1},
 		"file:/proc/sys/kernel/random/poolsize":           {"2\n", "2\n", "\n", 1},
 		"file:/proc/sys/fs/file-nr":                       {"1 0 2\n", "1 0 2\n", "\n", 1},
+		"file:/proc/net/rpc/nfs":                          {"net 1 2 3 4\nrpc 1 2 3\n", "", "rpc 1 2 3\n", 0},
+		"file:/proc/net/ip_vs":                            {ipvsHeader + ipvsBackend, ipvsHeader, ipvsBackend, 0},
+		"file:/proc/net/ip_vs_stats":                      {"Total\nConns InPkts OutPkts InBytes OutBytes\n1 2 3 4 5\n\n", "Total\nConns InPkts OutPkts InBytes OutBytes\n1 2 3 4 5\n\n", "1 2 3 4 5\n", 1},
 		"file:/proc/loadavg":                              {"0 0 0 1/1 1\n", "0 0 0 1/1 1\n", "\n", 1},
 		"file:/proc/mdstat":                               {"Personalities : [raid1]\nmd0 : active raid1 sda[0]\n 1 blocks [1/1] [U]\n", "Personalities : [raid1]\n", "md%d : active raid1 sda[0]\n 1 blocks [1/1] [U]\n", 0},
 		"file:/proc/net/snmp":                             {"Tcp: InErrs\nTcp: 1\n", "", "P%d: InErrors\nP%d: 1\n", 0},
