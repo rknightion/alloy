@@ -45,6 +45,9 @@ type Component struct {
 	collectorNames  []string
 	collectorConfig collectors.Configs
 	allowed         map[string]agentless.Target
+	selections      map[string]Target
+	instances       []agentless.Collector
+	scrapers        map[string]*agentless.Scraper
 	timeout         time.Duration
 	base            discovery.Target
 }
@@ -86,20 +89,48 @@ func (c *Component) Update(raw component.Arguments) error {
 	if err := args.Validate(); err != nil {
 		return err
 	}
+	targets := args.targets()
 	allowed := make(map[string]agentless.Target)
-	for _, t := range args.targets() {
+	selections := make(map[string]Target)
+	for _, t := range targets {
 		allowed[t.Address] = agentless.Target{Address: t.Address, Auth: t.Auth}
+		selections[t.Address] = t
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cfg := args.collectorConfigs()
 	scraper := c.scraper
+	instances := c.instances
 	if scraper == nil || !slices.Equal(c.collectorNames, args.EnabledCollectors) || c.collectorConfig != cfg {
 		cs, err := collectors.Build(args.EnabledCollectors, cfg, c.opts.Logger)
 		if err != nil {
 			return err
 		}
+		instances = cs
 		scraper, err = agentless.NewScraper(c.pool, cs, c.opts.Logger)
+		if err != nil {
+			return err
+		}
+	}
+	scrapers := make(map[string]*agentless.Scraper)
+	for _, t := range targets {
+		if t.invalidSelection {
+			continue
+		}
+		key := strings.Join(t.collectorNames, ",")
+		if _, ok := scrapers[key]; ok {
+			continue
+		}
+		selected := make([]agentless.Collector, 0, len(t.collectorNames))
+		for _, name := range t.collectorNames {
+			for _, instance := range instances {
+				if instance.Name() == name {
+					selected = append(selected, instance)
+				}
+			}
+		}
+		var err error
+		scrapers[key], err = agentless.NewScraper(c.pool, selected, c.opts.Logger)
 		if err != nil {
 			return err
 		}
@@ -111,7 +142,8 @@ func (c *Component) Update(raw component.Arguments) error {
 	// updates; the lifetime pool remains the scraper's runner.
 	c.collectorNames, c.collectorConfig = slices.Clone(args.EnabledCollectors), cfg
 	c.scraper, c.allowed, c.timeout = scraper, allowed, args.Timeout
-	c.opts.OnStateChange(exporter.Exports{Targets: buildTargets(c.base, args.targets())})
+	c.instances, c.scrapers, c.selections = instances, scrapers, selections
+	c.opts.OnStateChange(exporter.Exports{Targets: buildTargets(c.base, targets)})
 	return nil
 }
 
@@ -126,6 +158,8 @@ func buildTargets(base discovery.Target, targets []Target) []discovery.Target {
 		}
 		base.ForEachLabel(func(k, v string) bool { labels[k] = v; return true })
 		labels["instance"], labels["__param_target"] = t.Address, t.Address
+		labels["__param_auth"] = t.Auth
+		labels["__param_collectors"] = strings.Join(t.collectorNames, ",")
 		out = append(out, discovery.NewTargetFromMap(labels))
 	}
 	return out
@@ -167,13 +201,26 @@ func (c *Component) collect(r *http.Request, address string) (prometheus.Collect
 	if !ok {
 		return nil, nil, http.StatusBadRequest, fmt.Errorf("unknown target")
 	}
+	scraper := c.scraper
+	if selection, ok := c.selections[address]; ok {
+		query := r.URL.Query()
+		for name, expected := range map[string]string{"auth": selection.Auth, "collectors": strings.Join(selection.collectorNames, ",")} {
+			if values, present := query[name]; present && (len(values) != 1 || values[0] != expected) {
+				return nil, nil, http.StatusBadRequest, fmt.Errorf("target selector mismatch")
+			}
+		}
+		if selection.invalidSelection {
+			return nil, nil, http.StatusServiceUnavailable, fmt.Errorf("SSH scrape failed")
+		}
+		scraper = c.scrapers[strings.Join(selection.collectorNames, ",")]
+	}
 	timeout, err := scrapeTimeout(r.Header.Get("X-Prometheus-Scrape-Timeout-Seconds"), c.timeout)
 	if err != nil {
 		return nil, nil, http.StatusBadRequest, err
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	started := time.Now()
-	metrics, err := c.scraper.Scrape(ctx, target)
+	metrics, err := scraper.Scrape(ctx, target)
 	if err != nil {
 		// Prometheus discards samples on HTTP 503. Its built-in target up=0
 		// and scrape_duration_seconds observe failures; do not depend on

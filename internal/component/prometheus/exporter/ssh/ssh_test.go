@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,13 @@ import (
 
 // inlineSSHServer runs the actual batch script, without emulating its framing.
 func inlineSSHServer(t *testing.T) (string, string, *atomic.Int32) {
+	t.Helper()
+	return inlineSSHServerWithFiles(t, nil)
+}
+
+// Replace procfs paths only at the server/process edge so Linux fixture data
+// exercises the real SSH framing and public handler on every development host.
+func inlineSSHServerWithFiles(t *testing.T, files map[string]string) (string, string, *atomic.Int32) {
 	t.Helper()
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
@@ -91,6 +99,19 @@ func inlineSSHServer(t *testing.T) (string, string, *atomic.Int32) {
 					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 					cmd := exec.CommandContext(ctx, "sh", "-s")
 					cmd.Stdin, cmd.Stdout, cmd.Stderr = channel, channel, io.Discard
+					if len(files) > 0 {
+						script, err := io.ReadAll(channel)
+						if err != nil {
+							cancel()
+							_ = channel.Close()
+							break
+						}
+						fixed := string(script)
+						for path, fixture := range files {
+							fixed = strings.ReplaceAll(fixed, path, fixture)
+						}
+						cmd.Stdin = strings.NewReader(fixed)
+					}
 					cmd.WaitDelay = 100 * time.Millisecond
 					status := uint32(0)
 					if cmd.Run() != nil {

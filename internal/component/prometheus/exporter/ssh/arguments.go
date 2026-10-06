@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,9 @@ type Target struct {
 	Address string            `alloy:"address,attr"`
 	Auth    string            `alloy:"auth,attr,optional"`
 	Labels  map[string]string `alloy:"labels,attr,optional"`
+
+	collectorNames   []string
+	invalidSelection bool
 }
 
 type DiskstatsConfig struct {
@@ -110,6 +114,9 @@ func (a Arguments) poolConfig() sshrunner.Config {
 	targets := a.targets()
 	cfg.Targets = make([]agentless.Target, 0, len(targets))
 	for _, target := range targets {
+		if target.invalidSelection {
+			continue
+		}
 		cfg.Targets = append(cfg.Targets, agentless.Target{Address: target.Address, Auth: target.Auth})
 	}
 	cfg.Timeout, cfg.DialTimeout = a.Timeout, a.DialTimeout
@@ -119,8 +126,19 @@ func (a Arguments) poolConfig() sshrunner.Config {
 }
 
 func (a Arguments) targets() []Target {
+	global := slices.Clone(a.EnabledCollectors)
+	if len(global) == 0 {
+		global = collectors.DefaultEnabled()
+	}
 	if len(a.Targets) > 0 {
-		return a.Targets
+		out := slices.Clone(a.Targets)
+		for i := range out {
+			if out[i].Auth == "" {
+				out[i].Auth = sshrunner.DefaultAuthName
+			}
+			out[i].collectorNames = slices.Clone(global)
+		}
+		return out
 	}
 	out := make([]Target, 0, len(a.TargetsList))
 	for _, dt := range a.TargetsList {
@@ -136,7 +154,22 @@ func (a Arguments) targets() []Target {
 			return true
 		})
 		name, _ := dt.Get("name")
-		out = append(out, Target{Name: name, Address: address, Labels: labels})
+		auth, _ := dt.Get("__param_auth")
+		if auth == "" {
+			auth = sshrunner.DefaultAuthName
+		}
+		names := slices.Clone(global)
+		selector, _ := dt.Get("__param_collectors")
+		if selector != "" {
+			names = strings.Split(selector, ",")
+		}
+		invalid := !slices.ContainsFunc(a.Auths, func(a Auth) bool { return a.Name == auth }) || collectors.Validate(names) != nil
+		for _, n := range names {
+			if !slices.Contains(global, n) {
+				invalid = true
+			}
+		}
+		out = append(out, Target{Name: name, Address: address, Auth: auth, Labels: labels, collectorNames: names, invalidSelection: invalid})
 	}
 	return out
 }
@@ -179,7 +212,7 @@ func (a Arguments) Validate() error {
 		if auth == "" {
 			auth = sshrunner.DefaultAuthName
 		}
-		if !auths[auth] {
+		if len(a.Targets) > 0 && !auths[auth] {
 			return errors.New("target selects an undefined auth")
 		}
 	}
@@ -205,7 +238,7 @@ func (a Arguments) Validate() error {
 			return errors.New("invalid collector regular expression")
 		}
 	}
-	// Discovery labels supply addresses and metadata only, not credentials.
+	// Only the reserved __param_auth label selects discovery credentials.
 	for _, t := range a.TargetsList {
 		if auth, _ := t.Get("auth"); auth != "" {
 			return errors.New("auth selection from discovery labels is not supported")

@@ -70,12 +70,12 @@ func TestPoolConfigTargetMembership(t *testing.T) {
 		{
 			name: "blocks",
 			args: Arguments{Targets: []Target{{Name: "one", Address: "host", Auth: "reader", Labels: map[string]string{"env": "test"}}, {Address: "[::1]:2222"}}},
-			want: []agentless.Target{{Address: "host", Auth: "reader"}, {Address: "[::1]:2222"}},
+			want: []agentless.Target{{Address: "host", Auth: "reader"}, {Address: "[::1]:2222", Auth: "default"}},
 		},
 		{
 			name: "discovery",
-			args: Arguments{TargetsList: []discovery.Target{discovery.NewTargetFromMap(map[string]string{"__address__": "host:2222", "name": "one"}), discovery.NewTargetFromMap(map[string]string{"address": "other"})}},
-			want: []agentless.Target{{Address: "host:2222"}, {Address: "other"}},
+			args: Arguments{Auths: []Auth{{Name: "default", Username: "reader", Password: "test-only"}}, TargetsList: []discovery.Target{discovery.NewTargetFromMap(map[string]string{"__address__": "host:2222", "name": "one"}), discovery.NewTargetFromMap(map[string]string{"address": "other"})}},
+			want: []agentless.Target{{Address: "host:2222", Auth: "default"}, {Address: "other", Auth: "default"}},
 		},
 		{name: "empty", want: []agentless.Target{}},
 	} {
