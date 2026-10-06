@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -347,24 +348,58 @@ func TestFilesystemHostileCombined(t *testing.T) {
 func TestFilesystemIndexedMatching(t *testing.T) {
 	c, err := newFilesystemCollector(Configs{}, nil)
 	require.NoError(t, err)
-	var mounts, df strings.Builder
-	df.WriteString("Filesystem Type Blocks Used Available Capacity Mounted on\n")
-	for j := range 10000 {
-		fmt.Fprintf(&mounts, "/dev/d%d /m%d ext4 rw 0 0\n", j, j)
-		fmt.Fprintf(&df, "/dev/d%d ext4 10 3 5 50%% /m%d\n", j, j)
-	}
-	in := agentless.Input{}
-	for j, read := range c.Reads() {
-		output := df.String()
-		if j == 2 {
-			output = mounts.String()
+	input := func(count int) agentless.Input {
+		var mounts, df strings.Builder
+		df.WriteString("Filesystem Type Blocks Used Available Capacity Mounted on\n")
+		for j := range count {
+			fmt.Fprintf(&mounts, "/dev/d%d /m%d ext4 rw 0 0\n", j, j)
+			fmt.Fprintf(&df, "/dev/d%d ext4 10 3 5 50%% /m%d\n", j, j)
 		}
-		in[read.ID] = agentless.Result{Read: read, Output: []byte(output)}
+		in := agentless.Input{}
+		for j, read := range c.Reads() {
+			output := df.String()
+			if j == 2 {
+				output = mounts.String()
+			}
+			in[read.ID] = agentless.Result{Read: read, Output: []byte(output)}
+		}
+		return in
 	}
-	ch := make(chan prometheus.Metric, 70000)
-	start := time.Now()
-	require.NoError(t, c.Update(agentless.Target{}, in, ch))
-	require.Less(t, time.Since(start), time.Second)
+	// Keep 2n at the original 10000-row limit. Time the real Update path,
+	// excluding fixture construction, channel allocation and metric inspection.
+	inputs := []agentless.Input{input(5000), input(10000)}
+	channels := []chan prometheus.Metric{make(chan prometheus.Metric, 35000), make(chan prometheus.Metric, 70000)}
+	measure := func(size int) time.Duration {
+		for len(channels[size]) > 0 {
+			<-channels[size]
+		}
+		start := time.Now()
+		err := c.Update(agentless.Target{}, inputs[size], channels[size])
+		elapsed := time.Since(start)
+		require.NoError(t, err)
+		return elapsed
+	}
+	// Warm both sizes, then alternate their order to avoid a systematic bias.
+	// Medians of five samples resist occasional scheduler/GC pauses under -race.
+	measure(0)
+	measure(1)
+	var timings [2][]time.Duration
+	for sample := range 5 {
+		for offset := range 2 {
+			size := (sample + offset) % 2
+			timings[size] = append(timings[size], measure(size))
+		}
+	}
+	for _, samples := range timings {
+		slices.Sort(samples)
+	}
+	small, large := timings[0][2], timings[1][2]
+	ratio := float64(large) / float64(small)
+	t.Logf("Collector.Update median: n=5000 %s, 2n=10000 %s, ratio=%.3f", small, large, ratio)
+	// Linear growth predicts 2x. Allow 50% scheduling/allocation noise (3x),
+	// while rejecting the approximately 4x growth of a quadratic matcher.
+	require.Less(t, ratio, 3.0, "filesystem matching must scale roughly linearly")
+	ch := channels[1]
 	require.Len(t, ch, 70000)
 	for len(ch) > 0 {
 		metric := <-ch
