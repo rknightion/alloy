@@ -76,13 +76,13 @@ func TestSockstatRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "sockstat", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "sockstat")
+	require.Contains(t, DefaultEnabled(), "sockstat")
 	found := false
 	for _, registration := range Registered() {
 		if registration.Name == "sockstat" {
 			found = true
 			require.Equal(t, "linux", registration.OS)
-			require.False(t, registration.DefaultEnabled)
+			require.True(t, registration.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

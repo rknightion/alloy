@@ -37,11 +37,11 @@ func TestSchedstatRegistrationAndReads(t *testing.T) {
 	require.Equal(t, []agentless.Read{agentless.FileRead("/proc/schedstat")}, built[0].Reads())
 	require.NoError(t, built[0].Reads()[0].Validate())
 	require.Empty(t, built[0].Reads()[0].Argv)
-	require.NotContains(t, DefaultEnabled(), "schedstat")
+	require.Contains(t, DefaultEnabled(), "schedstat")
 	for _, r := range Registered() {
 		if r.Name == "schedstat" {
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 }

@@ -71,7 +71,7 @@ Updates to inline content also replace trust through component configuration upd
 A failed file reload retains the previous snapshot and increments `agentless_ssh_known_hosts_reload_failures_total`.
 Malformed-content diagnostics don't include the supplied host key content.
 
-An empty `enabled_collectors` list enables the 15 default collectors: `conntrack`, `cpu`, `diskstats`, `entropy`, `filefd`, `filesystem`, `loadavg`, `meminfo`, `netdev`, `netstat`, `os`, `pressure`, `stat`, `uname`, and `vmstat`.
+An empty `enabled_collectors` list enables the 20 default collectors: `conntrack`, `cpu`, `diskstats`, `entropy`, `filefd`, `filesystem`, `loadavg`, `mdadm`, `meminfo`, `netdev`, `netstat`, `os`, `pressure`, `schedstat`, `sockstat`, `softnet`, `stat`, `udp_queues`, `uname`, and `vmstat`.
 Unknown or duplicate collector names cause a configuration error.
 Timeouts must be positive, `max_concurrent_dials` must be at least `1`, and `max_sessions_per_target` must be between `1` and `9`.
 Addresses must be unique, including equivalent host and port forms.
@@ -99,12 +99,17 @@ You can't supply custom commands.
 | `filefd` | `/proc/sys/fs/file-nr`. | File descriptor gauges (`node_filefd_allocated` and `node_filefd_maximum`). |
 | `filesystem` | `env LC_ALL=C df -akPT`, `env LC_ALL=C df -aiPT`, and `/proc/self/mounts`. | Space, inode, read-only, and device-error gauges (`node_filesystem_*`). |
 | `loadavg` | `/proc/loadavg`. | Load averages (`node_load1`, `node_load5`, and `node_load15`). |
+| `mdadm` | `/proc/mdstat`. | Software RAID state, disk counts, required disks, blocks, and synced blocks (`node_md_*`). |
 | `meminfo` | `/proc/meminfo`. | Memory gauges (`node_memory_*`). |
 | `netdev` | `/proc/net/dev`. | Network receive and transmit counters (`node_network_*`). |
 | `netstat` | `/proc/net/snmp`, `/proc/net/snmp6`, and `/proc/net/netstat`. | Selected protocol statistics (`node_netstat_*`). |
 | `os` | `/etc/os-release`, with `/usr/lib/os-release` as fallback. | OS identity (`node_os_info`). |
 | `pressure` | `/proc/pressure/cpu`, `/proc/pressure/memory`, `/proc/pressure/io`, and `/proc/pressure/irq`. | CPU, memory, and I/O waiting time counters and memory and I/O stalled time counters (`node_pressure_*_seconds_total`). CPU full and IRQ statistics aren't exported. |
+| `schedstat` | `/proc/schedstat`. | Per-CPU running and waiting time counters and timeslice counters (`node_schedstat_*`). |
+| `sockstat` | `/proc/net/sockstat`, `/proc/net/sockstat6`, and `getconf PAGESIZE`. | Socket usage and memory gauges (`node_sockstat_*`), using the target's page size for byte values. |
+| `softnet` | `/proc/net/softnet_stat`. | Per-CPU packet processing counters and backlog gauges (`node_softnet_*`). |
 | `stat` | `/proc/stat`. | Boot time, context switches, interrupts, forks, and running or blocked processes. |
+| `udp_queues` | `/proc/net/udp` and `/proc/net/udp6`. | Aggregated transmit and receive queue memory gauges by IP version (`node_udp_queues`). |
 | `uname` | `uname -s`, `uname -n`, `uname -r`, `uname -v`, `uname -m`, and `/proc/sys/kernel/domainname`. | Kernel and host identity (`node_uname_info`). |
 | `vmstat` | `/proc/vmstat`. | Selected virtual memory statistics (`node_vmstat_*`), with fields matching `^(oom_kill\|pgpg\|pswp\|pg.*fault).*`. |
 

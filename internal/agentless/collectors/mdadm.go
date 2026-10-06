@@ -29,7 +29,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "mdadm", OS: "linux", DefaultEnabled: false, Factory: newMdadmCollector})
+	Register(Registration{Name: "mdadm", OS: "linux", DefaultEnabled: true, Factory: newMdadmCollector})
 }
 
 // Eleven series per device, five fixed families. Reserve space for the longest

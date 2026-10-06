@@ -26,7 +26,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "softnet", OS: "linux", DefaultEnabled: false, Factory: newSoftnetCollector})
+	Register(Registration{Name: "softnet", OS: "linux", DefaultEnabled: true, Factory: newSoftnetCollector})
 }
 
 // Seven fixed families leave at most 2857 CPU rows within the frozen 20000

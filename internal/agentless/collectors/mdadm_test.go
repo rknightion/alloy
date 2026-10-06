@@ -46,11 +46,11 @@ func TestMdadmRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cs, 1)
 	require.Equal(t, "mdadm", cs[0].Name())
-	require.NotContains(t, DefaultEnabled(), "mdadm")
+	require.Contains(t, DefaultEnabled(), "mdadm")
 	for _, r := range Registered() {
 		if r.Name == "mdadm" {
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.Equal(t, []agentless.Read{agentless.FileRead("/proc/mdstat")}, cs[0].Reads())

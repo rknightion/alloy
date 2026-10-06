@@ -31,13 +31,13 @@ func TestSoftnetRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cs, 1)
 	require.Equal(t, "softnet", cs[0].Name())
-	require.NotContains(t, DefaultEnabled(), "softnet")
+	require.Contains(t, DefaultEnabled(), "softnet")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "softnet" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

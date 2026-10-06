@@ -50,13 +50,13 @@ func TestUDPQueuesRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "udp_queues", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "udp_queues")
+	require.Contains(t, DefaultEnabled(), "udp_queues")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "udp_queues" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

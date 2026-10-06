@@ -25,7 +25,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "schedstat", OS: "linux", DefaultEnabled: false, Factory: newSchedstatCollector})
+	Register(Registration{Name: "schedstat", OS: "linux", DefaultEnabled: true, Factory: newSchedstatCollector})
 }
 
 // Three fixed families, with at most 20,000 series and 4,096 bytes per label.

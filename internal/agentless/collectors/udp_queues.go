@@ -27,7 +27,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "udp_queues", OS: "linux", DefaultEnabled: false, Factory: newUDPQueuesCollector})
+	Register(Registration{Name: "udp_queues", OS: "linux", DefaultEnabled: true, Factory: newUDPQueuesCollector})
 }
 
 type udpQueuesCollector struct{ desc *prometheus.Desc }

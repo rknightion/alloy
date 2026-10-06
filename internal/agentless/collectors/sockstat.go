@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "sockstat", OS: "linux", DefaultEnabled: false, Factory: newSockstatCollector})
+	Register(Registration{Name: "sockstat", OS: "linux", DefaultEnabled: true, Factory: newSockstatCollector})
 }
 
 type sockstatCollector struct{}
