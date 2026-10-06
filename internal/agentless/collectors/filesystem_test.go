@@ -3,11 +3,13 @@ package collectors
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/grafana/alloy/internal/agentless"
 	"github.com/grafana/alloy/internal/agentless/agentlesstest"
@@ -264,6 +266,9 @@ func TestFilesystemEndpointWhitespace(t *testing.T) {
 	for _, endpoints := range []struct{ device, mount string }{
 		{" leading source", "/proof"},
 		{"source", "/proof trailing "},
+		{strings.Repeat("source", 16000), "/" + strings.Repeat("mount", 16000)},
+		{"source", "/proof"},
+		{"source extended", "/proof extended"},
 	} {
 		in := agentless.Input{}
 		for _, read := range c.Reads()[:2] {
@@ -280,6 +285,192 @@ func TestFilesystemEndpointWhitespace(t *testing.T) {
 		}
 		require.Equal(t, endpoints.device, labels["device"])
 		require.Equal(t, endpoints.mount, labels["mountpoint"])
+	}
+}
+
+// Exercise the collector seam, including duplicate rows (not just map size).
+func TestFilesystemInputBounds(t *testing.T) {
+	c, err := newFilesystemCollector(Configs{}, nil)
+	require.NoError(t, err)
+	for _, count := range []int{10000, 10001, 55000} {
+		for _, overflow := range []string{"mounts", "blocks", "inodes"} {
+			t.Run(fmt.Sprintf("%s/%d", overflow, count), func(t *testing.T) {
+				in := agentless.Input{}
+				for j, read := range c.Reads() {
+					rows := 1
+					if []string{"blocks", "inodes", "mounts"}[j] == overflow {
+						rows = count
+					}
+					output := strings.Repeat("/dev/a /proof ext4 rw 0 0\n", rows)
+					if j < 2 {
+						output = "Filesystem Type Blocks Used Available Capacity Mounted on\n" + strings.Repeat("/dev/a ext4 10 3 5 50% /proof\n", rows)
+					}
+					in[read.ID] = agentless.Result{Read: read, Output: []byte(output)}
+				}
+				start := time.Now()
+				err := c.Update(agentless.Target{}, in, make(chan prometheus.Metric, 8))
+				require.Less(t, time.Since(start), time.Second)
+				if count > 10000 {
+					require.ErrorContains(t, err, "limit")
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
+
+func TestFilesystemHostileCombined(t *testing.T) {
+	c, err := newFilesystemCollector(Configs{}, nil)
+	require.NoError(t, err)
+	var mounts, df strings.Builder
+	df.WriteString("Filesystem Type Blocks Used Available Capacity Mounted on\n")
+	for j := range 55000 {
+		fmt.Fprintf(&mounts, "d%d /m%d ext4 rw 0 0\n", j, j)
+		fmt.Fprintf(&df, "d%d ext4 10 3 5 50%% /m%d\n", j, j)
+	}
+	in := agentless.Input{}
+	for j, read := range c.Reads() {
+		output := df.String()
+		if j == 2 {
+			output = mounts.String()
+		}
+		in[read.ID] = agentless.Result{Read: read, Output: []byte(output)}
+	}
+	start := time.Now()
+	ch := make(chan prometheus.Metric, 1)
+	require.ErrorContains(t, c.Update(agentless.Target{}, in, ch), "limit")
+	require.Less(t, time.Since(start), time.Second)
+	require.Empty(t, ch)
+}
+
+func TestFilesystemIndexedMatching(t *testing.T) {
+	c, err := newFilesystemCollector(Configs{}, nil)
+	require.NoError(t, err)
+	var mounts, df strings.Builder
+	df.WriteString("Filesystem Type Blocks Used Available Capacity Mounted on\n")
+	for j := range 10000 {
+		fmt.Fprintf(&mounts, "/dev/d%d /m%d ext4 rw 0 0\n", j, j)
+		fmt.Fprintf(&df, "/dev/d%d ext4 10 3 5 50%% /m%d\n", j, j)
+	}
+	in := agentless.Input{}
+	for j, read := range c.Reads() {
+		output := df.String()
+		if j == 2 {
+			output = mounts.String()
+		}
+		in[read.ID] = agentless.Result{Read: read, Output: []byte(output)}
+	}
+	ch := make(chan prometheus.Metric, 70000)
+	start := time.Now()
+	require.NoError(t, c.Update(agentless.Target{}, in, ch))
+	require.Less(t, time.Since(start), time.Second)
+	require.Len(t, ch, 70000)
+	for len(ch) > 0 {
+		metric := <-ch
+		if strings.Contains(metric.Desc().String(), "node_filesystem_device_error") {
+			value := &dto.Metric{}
+			require.NoError(t, metric.Write(value))
+			require.Zero(t, value.GetGauge().GetValue())
+		}
+	}
+}
+
+func TestFilesystemOverlappingMounts(t *testing.T) {
+	c, err := newFilesystemCollector(Configs{}, nil)
+	require.NoError(t, err)
+	var mounts, df strings.Builder
+	df.WriteString("Filesystem Type Blocks Used Available Capacity Mounted on\n")
+	for j := 1; j <= 580; j++ {
+		mount := strings.TrimSpace(strings.Repeat("/m ", j))
+		fmt.Fprintf(&mounts, "x %s ext4 rw 0 0\n", strings.ReplaceAll(mount, " ", `\040`))
+		fmt.Fprintf(&df, "x ext4 10 3 5 50%% %s\n", mount)
+	}
+	in := agentless.Input{}
+	for j, read := range c.Reads() {
+		output := df.String()
+		if j == 2 {
+			output = mounts.String()
+		}
+		require.Less(t, len(output), 1<<20)
+		in[read.ID] = agentless.Result{Read: read, Output: []byte(output)}
+	}
+	ch := make(chan prometheus.Metric, 580*7)
+	start := time.Now()
+	require.NoError(t, c.Update(agentless.Target{}, in, ch))
+	require.Less(t, time.Since(start), time.Second)
+	require.Len(t, ch, 580*7)
+}
+
+func TestFilesystemOverlappingSources(t *testing.T) {
+	c, err := newFilesystemCollector(Configs{}, nil)
+	require.NoError(t, err)
+	var mounts, df strings.Builder
+	df.WriteString("Filesystem Type Blocks Used Available Capacity Mounted on\n")
+	mount := strings.Repeat("/a", 500)
+	for j := 1; j <= 400; j++ {
+		source := strings.TrimSpace(strings.Repeat("s ", j))
+		fmt.Fprintf(&mounts, "%s %s ext4 rw 0 0\n", strings.ReplaceAll(source, " ", `\040`), mount)
+		fmt.Fprintf(&df, "%s ext4 10 3 5 50%% %s\n", source, mount)
+	}
+	in := agentless.Input{}
+	total := 0
+	for j, read := range c.Reads() {
+		output := df.String()
+		if j == 2 {
+			output = mounts.String()
+		}
+		require.Less(t, len(output), 1<<20)
+		total += len(output)
+		in[read.ID] = agentless.Result{Read: read, Output: []byte(output)}
+	}
+	require.Less(t, total, 8<<20)
+	ch := make(chan prometheus.Metric, 400*7)
+	start := time.Now()
+	require.NoError(t, c.Update(agentless.Target{}, in, ch))
+	elapsed := time.Since(start)
+	t.Logf("Collector.Update: %s", elapsed)
+	require.Less(t, elapsed, time.Second)
+	require.Len(t, ch, 400*7)
+}
+
+// Compare the index with the original literal-endpoint/Fields contract,
+// including endpoint whitespace that must not be normalized or decoded.
+func TestFilesystemEndpointIndexConformance(t *testing.T) {
+	mounts := map[filesystemKey]string{}
+	for _, source := range []string{"s", "s s", " s", "s ", "s\t", "s \t", "s\u2003"} {
+		for _, mount := range []string{"/m", "/m /m", " /m", "\t/m", " \t/m", "\u2003/m", "/m ", " "} {
+			for _, fstype := range []string{"ext4", "tmpfs"} {
+				mounts[filesystemKey{source, fstype, mount}] = "rw"
+			}
+		}
+	}
+	index := filesystemIndex(mounts)
+	for key := range mounts {
+		for _, padding := range []string{" ", "\t", " \u2003\t", "\u2003 "} {
+			line := key.device + padding + key.fstype + " 10\u20033\t5 50%" + padding + key.mount
+			want := map[filesystemKey]bool{}
+			for candidate := range mounts {
+				if !strings.HasPrefix(line, candidate.device) || !strings.HasSuffix(line, candidate.mount) {
+					continue
+				}
+				start, end := len(candidate.device), len(line)-len(candidate.mount)
+				if end <= start || line[start] != ' ' && line[start] != '\t' || line[end-1] != ' ' && line[end-1] != '\t' {
+					continue
+				}
+				fields := strings.Fields(line[start:end])
+				if len(fields) == 5 && fields[0] == candidate.fstype {
+					want[candidate] = true
+				}
+			}
+			matches, _ := index.matches(line)
+			got := map[filesystemKey]bool{}
+			for _, match := range matches {
+				require.False(t, got[match.key], "duplicate match for %q", line)
+				got[match.key] = true
+			}
+			require.Equal(t, want, got, "line %q", line)
+		}
 	}
 }
 
