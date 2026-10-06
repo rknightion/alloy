@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -19,7 +18,40 @@ func init() {
 }
 
 // Match node_exporter's default field selection. No configurable reads or filters.
-var netstatFields = regexp.MustCompile(`^(.*_(InErrors|InErrs)|Ip_Forwarding|Ip(6|Ext)_(InOctets|OutOctets)|Icmp6?_(InMsgs|OutMsgs)|TcpExt_(Listen.*|Syncookies.*|TCPSynRetrans|TCPTimeouts)|Tcp_(ActiveOpens|InSegs|OutSegs|OutRsts|PassiveOpens|RetransSegs|CurrEstab)|Udp6?_(InDatagrams|OutDatagrams|NoPorts|RcvbufErrors|SndbufErrors))$`)
+func netstatFieldSelected(key string) bool {
+	// The former regexp's wildcard matches every byte sequence except a newline.
+	if strings.IndexByte(key, '\n') >= 0 {
+		return false
+	}
+	if strings.HasSuffix(key, "_InErrors") || strings.HasSuffix(key, "_InErrs") {
+		return true
+	}
+	protocol, name, ok := strings.Cut(key, "_")
+	if !ok {
+		return false
+	}
+	switch protocol {
+	case "Ip":
+		return name == "Forwarding"
+	case "Ip6", "IpExt":
+		return name == "InOctets" || name == "OutOctets"
+	case "Icmp", "Icmp6":
+		return name == "InMsgs" || name == "OutMsgs"
+	case "TcpExt":
+		return strings.HasPrefix(name, "Listen") || strings.HasPrefix(name, "Syncookies") || name == "TCPSynRetrans" || name == "TCPTimeouts"
+	case "Tcp":
+		switch name {
+		case "ActiveOpens", "InSegs", "OutSegs", "OutRsts", "PassiveOpens", "RetransSegs", "CurrEstab":
+			return true
+		}
+	case "Udp", "Udp6":
+		switch name {
+		case "InDatagrams", "OutDatagrams", "NoPorts", "RcvbufErrors", "SndbufErrors":
+			return true
+		}
+	}
+	return false
+}
 
 // Bound all retained fields, including filtered fields, before metric emission.
 // The central Scraper cannot bound a collector's pre-send parsing state.
@@ -62,7 +94,7 @@ func (c *netstatCollector) Update(_ agentless.Target, in agentless.Input, ch cha
 		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
 			return fmt.Errorf("netstat: invalid value for %s", key)
 		}
-		if netstatFields.MatchString(key) {
+		if netstatFieldSelected(key) {
 			protocol, name, _ := strings.Cut(key, "_")
 			desc := prometheus.NewDesc(agentless.Namespace+"_netstat_"+key, "Statistic "+protocol+name+".", nil, nil)
 			metric, err := prometheus.NewConstMetric(desc, prometheus.UntypedValue, value)
