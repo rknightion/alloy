@@ -1,0 +1,11 @@
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port Forward Weight ActiveConn InActConn
+TCP [0000:0000:0000:0000:0000:ffff:c000:0201]:0050 wlc
+  -> [0000:0000:0000:0000:0000:ffff:c000:0202]:1F90 Masq 1 2 3
+TCP C0000201:0050 wlc
+  -> C0000202:1F90 Masq 4 5 6
+UDP [2001:0db8:0000:0000:0000:0000:0000:0001]:0035 wlc
+  -> [2001:0db8:0000:0000:0000:0000:0000:0002]:0035 Masq 7 8 9
+FWM 1 wlc
+  -> [0000:0000:0000:0000:0000:ffff:c000:0203]:01BB Masq 10 11 12

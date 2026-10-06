@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/grafana/alloy/internal/agentless/agentlesstest"
 	"github.com/grafana/alloy/internal/agentless/conformance"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/procfs"
 	"github.com/stretchr/testify/require"
 )
 
@@ -184,6 +186,85 @@ func TestIPVSAggregationAndIPv6(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "2001:db8::1", address)
 	require.Equal(t, "80", port)
+}
+
+// Exercise registration, scraping and gathered labels against the pinned procfs
+// parser used by node_exporter, including aggregation across mapped/native IPv4.
+func TestIPVSMappedIPv6PublicParity(t *testing.T) {
+	const root = "testdata/ipvs/mapped/proc"
+	fs, err := procfs.NewFS(root)
+	require.NoError(t, err)
+	backends, err := fs.IPVSBackendStatus()
+	require.NoError(t, err)
+	require.Len(t, backends, 4)
+	require.Equal(t, "192.0.2.1", backends[0].LocalAddress.String())
+	require.Equal(t, "192.0.2.2", backends[0].RemoteAddress.String())
+	want := map[[6]string][3]uint64{}
+	for _, backend := range backends {
+		local := ""
+		if backend.LocalAddress != nil {
+			local = backend.LocalAddress.String()
+		}
+		labels := [6]string{local, strconv.FormatUint(uint64(backend.LocalPort), 10), backend.RemoteAddress.String(), strconv.FormatUint(uint64(backend.RemotePort), 10), backend.Proto, backend.LocalMark}
+		values := want[labels]
+		values[0] += backend.ActiveConn
+		values[1] += backend.InactConn
+		values[2] += backend.Weight
+		want[labels] = values
+	}
+	require.Len(t, want, 3)
+
+	built, err := Build([]string{"ipvs"}, DefaultConfigs(), nil)
+	require.NoError(t, err)
+	require.Len(t, built, 1)
+	_, in := ipvsFixture(t)
+	read := built[0].Reads()[1]
+	output, err := os.ReadFile(root + "/net/ip_vs")
+	require.NoError(t, err)
+	in[read.ID] = agentless.Result{Read: read, Output: output}
+	scraper, err := agentless.NewScraper(&agentlesstest.FakeRunner{Results: in}, built, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err := scraper.Scrape(ctx, agentless.Target{})
+	require.NoError(t, err)
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(result)
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	seen := map[string]bool{}
+	for _, family := range families {
+		if family.GetName() == "node_scrape_collector_success" {
+			require.Len(t, family.Metric, 1)
+			require.Equal(t, 1.0, family.Metric[0].GetGauge().GetValue())
+		}
+		for i, descriptor := range ipvsFamilies {
+			if family.GetName() != "node_ipvs_"+descriptor.name {
+				continue
+			}
+			seen[family.GetName()] = true
+			if i < 5 {
+				require.Len(t, family.Metric, 1)
+				continue
+			}
+			got := map[[6]string]float64{}
+			for _, metric := range family.Metric {
+				require.Len(t, metric.Label, 6)
+				labels := map[string]string{}
+				for _, label := range metric.Label {
+					labels[label.GetName()] = label.GetValue()
+				}
+				key := [6]string{labels["local_address"], labels["local_port"], labels["remote_address"], labels["remote_port"], labels["proto"], labels["local_mark"]}
+				got[key] = metric.GetGauge().GetValue()
+			}
+			expected := map[[6]string]float64{}
+			for labels, values := range want {
+				expected[labels] = float64(values[i-5])
+			}
+			require.Equal(t, expected, got, family.GetName())
+		}
+	}
+	require.Len(t, seen, len(ipvsFamilies))
 }
 
 func TestIPVSHostileBoundedRetention(t *testing.T) {

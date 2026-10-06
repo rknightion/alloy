@@ -260,5 +260,6 @@ func parseIPVSEndpoint(raw string) (string, string, error) {
 	if err != nil || strings.Contains(raw, "%") {
 		return "", "", errors.New("ipvs: invalid port")
 	}
-	return address.String(), strconv.FormatUint(port, 10), nil
+	// procfs/node_exporter renders mapped IPv6 with net.IP.String as IPv4.
+	return address.Unmap().String(), strconv.FormatUint(port, 10), nil
 }
