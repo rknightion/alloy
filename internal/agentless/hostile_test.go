@@ -109,3 +109,195 @@ func TestHostileAllCollectorsHeap(t *testing.T) {
 	runtime.KeepAlive(cs)
 	runtime.KeepAlive(families)
 }
+
+// Exercise each declared read separately: making every read hostile at once
+// would let an early parser error hide later reads (notably os-release fallback).
+// Unlike the legacy six-collector proof above, this follows the default registry
+// and fails closed when a new default or fixed read lacks a fixture.
+func TestHostileDefaultCollectorsHeap(t *testing.T) {
+	cs, err := collectors.Build(collectors.DefaultEnabled(), collectors.DefaultConfigs(), util.TestLogger(t))
+	require.NoError(t, err)
+	require.NotEmpty(t, cs)
+	legacy := hostileResults()
+	type fixture struct {
+		valid, header, line string
+		success             float64
+	}
+	const conntrackHeader = "entries searched found new invalid ignore delete delete_list insert insert_failed drop early_drop icmp_error expect_new expect_create expect_delete search_restart\n"
+	const conntrackRow = "1 0 1 0 1 1 0 0 1 1 1 1 0 0 0 0 1\n"
+	const udpHeader = "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
+	const udpRow = "0: 00000000:0016 00000000:0000 0A 00000015:00000002 00:00000000 00000000 0 0 2740 1 ffff88003d3af3c0 100\n"
+	const psi = "some avg10=0 avg60=0 avg300=0 total=1\nfull avg10=0 avg60=0 avg300=0 total=1\n"
+	fixtures := map[string]fixture{
+		"file:/proc/stat":                                 {valid: "cpu 0 0 0 0\ncpu0 1\n"},
+		"file:/proc/diskstats":                            {valid: "1 1 d0 0 0 0 0 0 0 0 0 0 0 0\n"},
+		"file:/proc/net/dev":                              {valid: "Inter-|\nface |\nn0:0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"},
+		"file:/proc/meminfo":                              {valid: "MemTotal: 1 kB\n"},
+		"file:/proc/self/mounts":                          {valid: "x /m0 e rw 0 0\n"},
+		"cmd:env LC_ALL=C df -akPT":                       {valid: "Filesystem\nx e 1 0 1 0% /m0\n"},
+		"cmd:env LC_ALL=C df -aiPT":                       {valid: "Filesystem\nx e 1 0 1 0% /m0\n"},
+		"file:/proc/sys/net/netfilter/nf_conntrack_count": {"1\n", "1\n", "\n", 1},
+		"file:/proc/sys/net/netfilter/nf_conntrack_max":   {"2\n", "2\n", "\n", 1},
+		"file:/proc/net/stat/nf_conntrack":                {conntrackHeader + conntrackRow, conntrackHeader, conntrackRow, 1},
+		"file:/proc/sys/kernel/random/entropy_avail":      {"1\n", "1\n", "\n", 1},
+		"file:/proc/sys/kernel/random/poolsize":           {"2\n", "2\n", "\n", 1},
+		"file:/proc/sys/fs/file-nr":                       {"1 0 2\n", "1 0 2\n", "\n", 1},
+		"file:/proc/loadavg":                              {"0 0 0 1/1 1\n", "0 0 0 1/1 1\n", "\n", 1},
+		"file:/proc/mdstat":                               {"Personalities : [raid1]\nmd0 : active raid1 sda[0]\n 1 blocks [1/1] [U]\n", "Personalities : [raid1]\n", "md%d : active raid1 sda[0]\n 1 blocks [1/1] [U]\n", 0},
+		"file:/proc/net/snmp":                             {"Tcp: InErrs\nTcp: 1\n", "", "P%d: InErrors\nP%d: 1\n", 0},
+		"file:/proc/net/snmp6":                            {"Ip6InOctets 1\n", "", "Ip6X%dInErrors 1\n", 0},
+		"file:/proc/net/netstat":                          {"TcpExt: ListenDrops\nTcpExt: 1\n", "", "P%d: InErrors\nP%d: 1\n", 0},
+		"file:/etc/os-release":                            {"NAME=Linux\nID=linux\n", "NAME=Linux\nID=linux\n", "X%d=1\n", 1},
+		"file:/usr/lib/os-release":                        {"NAME=Linux\nID=linux\n", "NAME=Linux\nID=linux\n", "X%d=1\n", 1},
+		"file:/proc/pressure/cpu":                         {psi, "", psi, 0},
+		"file:/proc/pressure/memory":                      {psi, "", psi, 0},
+		"file:/proc/pressure/io":                          {psi, "", psi, 0},
+		"file:/proc/pressure/irq":                         {psi, "", psi, 0},
+		"file:/proc/schedstat":                            {"version 15\ncpu0 0 0 0 0 0 0 1 1 1\n", "version 15\n", "cpu%d 0 0 0 0 0 0 1 1 1\n", 0},
+		"file:/proc/net/sockstat":                         {"sockets: used 1\nTCP: inuse 1\n", "", "P%d: inuse 1\n", 0},
+		"file:/proc/net/sockstat6":                        {"TCP6: inuse 1\n", "", "P%d: inuse 1\n", 0},
+		"cmd:getconf PAGESIZE":                            {"4096\n", "4096\n", "\n", 1},
+		"file:/proc/net/softnet_stat":                     {"0 0 0 0 0 0 0 0 0\n", "", "0 0 0 0 0 0 0 0 0\n", 0},
+		"file:/proc/net/udp":                              {udpHeader + udpRow, udpHeader, udpRow, 1},
+		"file:/proc/net/udp6":                             {udpHeader + udpRow, udpHeader, udpRow, 1},
+		"cmd:uname -s":                                    {"Linux\n", "", "Linux\n", 0},
+		"cmd:uname -n":                                    {"host\n", "", "host\n", 0},
+		"cmd:uname -r":                                    {"6.1\n", "", "6.1\n", 0},
+		"cmd:uname -v":                                    {"version\n", "", "version\n", 0},
+		"cmd:uname -m":                                    {"x86_64\n", "", "x86_64\n", 0},
+		"file:/proc/sys/kernel/domainname":                {"domain\n", "", "domain\n", 0},
+		"file:/proc/vmstat":                               {"pgfault 1\n", "", "pgfault%d 1\n", 0},
+	}
+	fill := func(f fixture) []byte {
+		var b strings.Builder
+		b.WriteString(f.header)
+		for i := 0; ; i++ {
+			line := f.line
+			if strings.Contains(line, "%d") {
+				// The paired netstat header/value rows use the same protocol.
+				line = strings.ReplaceAll(line, "%d", fmt.Sprint(i))
+			}
+			if b.Len()+len(line) > (1<<20)-1 {
+				break
+			}
+			b.WriteString(line)
+		}
+		return []byte(b.String())
+	}
+	for _, collector := range cs {
+		t.Run(collector.Name(), func(t *testing.T) {
+			reads := collector.Reads()
+			require.NotEmpty(t, reads)
+			// A successful ordinary snapshot proves that a hostile later read
+			// is not masked by malformed fixtures for earlier reads.
+			for hostileIndex := -1; hostileIndex < len(reads); hostileIndex++ {
+				name := "baseline"
+				if hostileIndex >= 0 {
+					name = fmt.Sprintf("read_%d", hostileIndex)
+				}
+				t.Run(name, func(t *testing.T) {
+					results := make(map[string]agentless.Result, len(reads))
+					for _, read := range reads {
+						f, ok := fixtures[read.ID]
+						require.True(t, ok, "missing fixture for default %s read %s", collector.Name(), read.ID)
+						results[read.ID] = agentless.Result{Read: read, Output: []byte(f.valid)}
+					}
+					readID, inputBytes, wantSuccess := "baseline", 0, 1.0
+					if hostileIndex >= 0 {
+						hostileRead := reads[hostileIndex]
+						f := fixtures[hostileRead.ID]
+						var output []byte
+						if res, ok := legacy[hostileRead.ID]; ok {
+							output = res.Output
+						} else {
+							require.NotEmpty(t, f.line, "missing hostile fixture for %s", hostileRead.ID)
+							output = fill(f)
+						}
+						require.Greater(t, len(output), 1000000, "exercise a nearly 1-MiB fixed read")
+						require.Less(t, len(output), 1<<20)
+						results[hostileRead.ID] = agentless.Result{Read: hostileRead, Output: output}
+						readID, inputBytes, wantSuccess = hostileRead.ID, len(output), f.success
+						if hostileRead.ID == "file:/usr/lib/os-release" {
+							read := agentless.FileRead("/etc/os-release")
+							results[read.ID] = agentless.Result{Read: read, NotExist: true, ExitStatus: 1}
+						}
+					}
+					runner := &agentlesstest.FakeRunner{Results: results}
+					s, err := agentless.NewScraper(runner, []agentless.Collector{collector}, util.TestLogger(t))
+					require.NoError(t, err)
+					require.Equal(t, reads, s.Reads())
+					runtime.GC()
+					var before, after runtime.MemStats
+					runtime.ReadMemStats(&before)
+					var peak atomic.Uint64
+					peak.Store(before.HeapInuse)
+					stopSampling := make(chan struct{})
+					samplingDone := make(chan struct{})
+					go func() {
+						defer close(samplingDone)
+						ticker := time.NewTicker(time.Millisecond)
+						defer ticker.Stop()
+						for {
+							var sample runtime.MemStats
+							runtime.ReadMemStats(&sample)
+							if sample.HeapInuse > peak.Load() {
+								peak.Store(sample.HeapInuse)
+							}
+							select {
+							case <-stopSampling:
+								return
+							case <-ticker.C:
+							}
+						}
+					}()
+					stopSampler := sync.OnceFunc(func() { close(stopSampling); <-samplingDone })
+					t.Cleanup(stopSampler)
+					start := time.Now()
+					c, err := s.Scrape(t.Context(), agentless.Target{Address: "host:22", Auth: "default"})
+					require.NoError(t, err)
+					reg := prometheus.NewRegistry()
+					require.NoError(t, reg.Register(c))
+					families, err := reg.Gather()
+					require.NoError(t, err)
+					stopSampler()
+					runtime.ReadMemStats(&after)
+					if after.HeapInuse > peak.Load() {
+						peak.Store(after.HeapInuse)
+					}
+					series, dataFamilies, successMetrics, durationMetrics := 0, 0, 0, 0
+					for _, family := range families {
+						switch family.GetName() {
+						case "node_scrape_collector_success":
+							successMetrics += len(family.Metric)
+							require.Len(t, family.Metric, 1)
+							require.Equal(t, wantSuccess, family.Metric[0].GetGauge().GetValue(), "read %s", readID)
+						case "node_scrape_collector_duration_seconds":
+							durationMetrics += len(family.Metric)
+						default:
+							dataFamilies++
+							series += len(family.Metric)
+						}
+						for _, metric := range family.Metric {
+							for _, label := range metric.Label {
+								require.LessOrEqual(t, len(label.GetValue()), 4096, "label cap for %s", family.GetName())
+							}
+						}
+					}
+					require.Equal(t, 1, runner.Calls())
+					require.Equal(t, 1, successMetrics)
+					require.Equal(t, 1, durationMetrics)
+					if wantSuccess == 1 {
+						require.Positive(t, series, "successful default must export data, not just scrape status")
+					}
+					require.LessOrEqual(t, series, 20000)
+					require.LessOrEqual(t, dataFamilies, 500)
+					t.Logf("collector=%s read=%s input=%d families=%d series=%d elapsed=%s total_alloc=%d heap_in_use=%d baseline=%d sampled_peak=%d", collector.Name(), readID, inputBytes, dataFamilies, series, time.Since(start), after.TotalAlloc-before.TotalAlloc, after.HeapInuse, before.HeapInuse, peak.Load())
+					require.Less(t, peak.Load(), uint64(64<<20), "hostile processing must stay below 64 MiB of sampled heap")
+					require.Less(t, after.HeapInuse, uint64(64<<20), "hostile default-collector Gather must use less than 64 MiB of heap")
+					runtime.KeepAlive(collector)
+					runtime.KeepAlive(families)
+				})
+			}
+		})
+	}
+}
