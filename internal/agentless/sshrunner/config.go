@@ -111,10 +111,10 @@ func prepare(cfg Config) (*settings, error) {
 	if cfg.MaxSessionsPerTarget < 1 || cfg.MaxSessionsPerTarget >= 10 || cfg.MaxConcurrentDials < 1 || cfg.Limits.MaxSectionBytes < 1 || cfg.Limits.MaxOutputBytes < 1 || cfg.ReconnectBackoffMax < cfg.ReconnectBackoffMin || cfg.AuthFailureBackoffMax < cfg.AuthFailureBackoffMin {
 		return nil, errors.New("sshrunner: invalid session, dial, output or backoff limits")
 	}
-	if len(cfg.KnownHostsFiles) == 0 {
-		return nil, errors.New("sshrunner: known_hosts files are required")
+	if cfg.KnownHosts == "" && len(cfg.KnownHostsFiles) == 0 {
+		return nil, errors.New("sshrunner: known_hosts content or files are required")
 	}
-	contents, err := readKnownHosts(cfg.KnownHostsFiles)
+	contents, err := combinedKnownHosts(cfg.KnownHosts, cfg.KnownHostsFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +126,23 @@ func prepare(cfg Config) (*settings, error) {
 }
 
 const maxKnownHostsBytes = 4 << 20
+
+// combinedKnownHosts is shared by preparation and reload so verification and
+// connection identity always use the same snapshot of both trust sources.
+func combinedKnownHosts(inline string, files []string) ([]byte, error) {
+	if len(inline) > maxKnownHostsBytes {
+		return nil, errors.New("sshrunner: known_hosts content exceeds 4 MiB")
+	}
+	contents, err := readKnownHosts(files)
+	if err != nil {
+		return nil, err
+	}
+	if inline != "" {
+		contents = append(contents, inline...)
+		contents = append(contents, '\n')
+	}
+	return contents, nil
+}
 
 func readKnownHosts(files []string) ([]byte, error) {
 	var contents []byte
@@ -196,7 +213,9 @@ func parseKnownHosts(contents []byte) (*hostKeys, error) {
 	}
 	verify, err := knownhosts.New(f.Name())
 	if err != nil {
-		return nil, fmt.Errorf("sshrunner: parse known_hosts: %w", err)
+		// Parser errors can quote trust input from secret-producing components.
+		// New and Update diagnostics must never expose those bytes.
+		return nil, errors.New("sshrunner: invalid known_hosts content")
 	}
 	certLines := make(map[int]bool)
 	for i, line := range strings.Split(string(contents), "\n") {

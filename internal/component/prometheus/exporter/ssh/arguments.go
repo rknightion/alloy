@@ -62,21 +62,22 @@ func (c *FilesystemConfig) SetToDefault() {
 
 // Arguments controls the transport, permitted targets and compiled-in collectors.
 type Arguments struct {
-	Auths                []Auth             `alloy:"auth,block"`
-	KnownHostsFiles      []string           `alloy:"known_hosts_files,attr"`
-	Targets              []Target           `alloy:"target,block,optional"`
-	TargetsList          []discovery.Target `alloy:"targets,attr,optional"`
-	EnabledCollectors    []string           `alloy:"enabled_collectors,attr,optional"`
-	Diskstats            DiskstatsConfig    `alloy:"diskstats,block,optional"`
-	Netdev               NetdevConfig       `alloy:"netdev,block,optional"`
-	Filesystem           FilesystemConfig   `alloy:"filesystem,block,optional"`
-	Timeout              time.Duration      `alloy:"timeout,attr,optional"`
-	DialTimeout          time.Duration      `alloy:"dial_timeout,attr,optional"`
-	MaxSessionsPerTarget int                `alloy:"max_sessions_per_target,attr,optional"`
-	MaxConcurrentDials   int                `alloy:"max_concurrent_dials,attr,optional"`
-	IdleTimeout          time.Duration      `alloy:"idle_timeout,attr,optional"`
-	KeepaliveInterval    time.Duration      `alloy:"keepalive_interval,attr,optional"`
-	KeepaliveTimeout     time.Duration      `alloy:"keepalive_timeout,attr,optional"`
+	Auths                []Auth                    `alloy:"auth,block"`
+	KnownHosts           alloytypes.OptionalSecret `alloy:"known_hosts,attr,optional"`
+	KnownHostsFiles      []string                  `alloy:"known_hosts_files,attr,optional"`
+	Targets              []Target                  `alloy:"target,block,optional"`
+	TargetsList          []discovery.Target        `alloy:"targets,attr,optional"`
+	EnabledCollectors    []string                  `alloy:"enabled_collectors,attr,optional"`
+	Diskstats            DiskstatsConfig           `alloy:"diskstats,block,optional"`
+	Netdev               NetdevConfig              `alloy:"netdev,block,optional"`
+	Filesystem           FilesystemConfig          `alloy:"filesystem,block,optional"`
+	Timeout              time.Duration             `alloy:"timeout,attr,optional"`
+	DialTimeout          time.Duration             `alloy:"dial_timeout,attr,optional"`
+	MaxSessionsPerTarget int                       `alloy:"max_sessions_per_target,attr,optional"`
+	MaxConcurrentDials   int                       `alloy:"max_concurrent_dials,attr,optional"`
+	IdleTimeout          time.Duration             `alloy:"idle_timeout,attr,optional"`
+	KeepaliveInterval    time.Duration             `alloy:"keepalive_interval,attr,optional"`
+	KeepaliveTimeout     time.Duration             `alloy:"keepalive_timeout,attr,optional"`
 }
 
 func (a *Arguments) SetToDefault() {
@@ -104,6 +105,7 @@ func (a Arguments) poolConfig() sshrunner.Config {
 	for _, auth := range a.Auths {
 		cfg.Auths[auth.Name] = sshrunner.Auth{Username: auth.Username, PrivateKey: []byte(auth.PrivateKey), Passphrase: []byte(auth.Passphrase), Password: []byte(auth.Password)}
 	}
+	cfg.KnownHosts = a.KnownHosts.Value
 	cfg.KnownHostsFiles = a.KnownHostsFiles
 	targets := a.targets()
 	cfg.Targets = make([]agentless.Target, 0, len(targets))
@@ -141,8 +143,8 @@ func (a Arguments) targets() []Target {
 
 // Validate rejects unknown collectors, ambiguous targets and unsafe options.
 func (a Arguments) Validate() error {
-	if len(a.KnownHostsFiles) == 0 {
-		return errors.New("known_hosts_files is required")
+	if a.KnownHosts.Value == "" && len(a.KnownHostsFiles) == 0 {
+		return errors.New("known_hosts or known_hosts_files is required")
 	}
 	if len(a.Auths) == 0 {
 		return errors.New("at least one auth block is required")

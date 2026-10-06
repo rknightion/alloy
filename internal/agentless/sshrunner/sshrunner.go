@@ -45,8 +45,11 @@ type Config struct {
 	// Auths maps an auth name to credentials. Targets select one by
 	// agentless.Target.Auth; an empty selection uses DefaultAuthName.
 	Auths map[string]Auth
-	// KnownHostsFiles lists OpenSSH known_hosts files. At least one is
-	// required. @cert-authority lines are honoured. There is no option to
+	// KnownHosts contains inline OpenSSH known_hosts content. At least one
+	// of KnownHosts and KnownHostsFiles is required; both are combined.
+	KnownHosts string
+	// KnownHostsFiles lists OpenSSH known_hosts files.
+	// @cert-authority lines are honoured. There is no option to
 	// skip host key verification. The client's HostKeyAlgorithms must be
 	// derived from the known_hosts entries for the target (golang/go#29286),
 	// or a host with several key types fails verification.
@@ -234,7 +237,7 @@ func (p *Pool) reloadKnownHosts() {
 	previous := p.cfg
 	p.mu.Unlock()
 
-	contents, err := readKnownHosts(previous.KnownHostsFiles)
+	contents, err := combinedKnownHosts(previous.KnownHosts, previous.KnownHostsFiles)
 	var keys *hostKeys
 	if err == nil {
 		if sha256.Sum256(contents) == previous.trust {
