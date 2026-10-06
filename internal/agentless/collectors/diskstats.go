@@ -135,7 +135,7 @@ func (c *diskstatsCollector) Update(_ agentless.Target, in agentless.Input, ch c
 			if i == 8 {
 				kind = prometheus.GaugeValue
 			}
-			ch <- prometheus.MustNewConstMetric(c.descs[i], kind, float64(value)*diskstatsFields[i].factor, device)
+			ch <- targetMetric(c.descs[i], kind, float64(value)*diskstatsFields[i].factor, device)
 		}
 	}
 	if err := scanner.Err(); err != nil {

@@ -44,7 +44,7 @@ func (c *unameCollector) Update(_ agentless.Target, in agentless.Input, ch chan<
 		// final newline. domainname is the kernel NIS domain, not a DNS suffix.
 		values = append(values, strings.TrimSuffix(string(output), "\n"))
 	}
-	ch <- prometheus.MustNewConstMetric(unameInfoDesc, prometheus.GaugeValue, 1, values...)
+	ch <- targetMetric(unameInfoDesc, prometheus.GaugeValue, 1, values...)
 	return nil
 }
 

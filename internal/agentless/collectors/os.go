@@ -66,12 +66,12 @@ func (c *osCollector) Update(_ agentless.Target, in agentless.Input, ch chan<- p
 			return fmt.Errorf("os: parse version: %w", err)
 		}
 	}
-	ch <- prometheus.MustNewConstMetric(osInfoDesc, prometheus.GaugeValue, 1,
+	ch <- targetMetric(osInfoDesc, prometheus.GaugeValue, 1,
 		env["BUILD_ID"], env["ID"], env["ID_LIKE"], env["IMAGE_ID"], env["IMAGE_VERSION"],
 		env["NAME"], env["PRETTY_NAME"], env["VARIANT"], env["VARIANT_ID"], env["VERSION"],
 		env["VERSION_CODENAME"], env["VERSION_ID"])
 	if version > 0 {
-		ch <- prometheus.MustNewConstMetric(osVersionDesc, prometheus.GaugeValue, version,
+		ch <- targetMetric(osVersionDesc, prometheus.GaugeValue, version,
 			env["ID"], env["ID_LIKE"], env["NAME"])
 	}
 	return nil

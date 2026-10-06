@@ -82,7 +82,7 @@ func readProcStat(in agentless.Input) (procStat, error) {
 			continue
 		}
 		key := fields[0]
-		isCPU := strings.HasPrefix(key, "cpu")
+		isCPU := strings.HasPrefix(key, cpuSubsystem)
 		known := isCPU || key == "softirq"
 		for _, m := range statMetrics {
 			known = known || key == m.key
@@ -95,8 +95,8 @@ func readProcStat(in agentless.Input) (procStat, error) {
 		}
 		if isCPU {
 			id := int64(-1)
-			if key != "cpu" {
-				id, err = strconv.ParseInt(strings.TrimPrefix(key, "cpu"), 10, 64)
+			if key != cpuSubsystem {
+				id, err = strconv.ParseInt(strings.TrimPrefix(key, cpuSubsystem), 10, 64)
 				if err != nil || id < 0 {
 					return procStat{}, fmt.Errorf("/proc/stat: invalid CPU ID %q", key)
 				}

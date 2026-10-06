@@ -126,7 +126,7 @@ func (c *netdevCollector) Update(_ agentless.Target, in agentless.Input, ch chan
 			continue
 		}
 		for i, value := range stats.values {
-			ch <- prometheus.MustNewConstMetric(c.descs[i], prometheus.CounterValue, float64(value), stats.name)
+			ch <- targetMetric(c.descs[i], prometheus.CounterValue, float64(value), stats.name)
 		}
 	}
 	return nil

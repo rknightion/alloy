@@ -111,7 +111,7 @@ func (c *filesystemCollector) Update(_ agentless.Target, in agentless.Input, ch 
 			continue
 		}
 		emit := func(suffix string, value float64) {
-			ch <- prometheus.MustNewConstMetric(c.descs[suffix], prometheus.GaugeValue, value, key.device, key.fstype, key.mount)
+			ch <- targetMetric(c.descs[suffix], prometheus.GaugeValue, value, key.device, key.fstype, key.mount)
 		}
 		b, bok := blocks[key]
 		i, iok := inodes[key]
