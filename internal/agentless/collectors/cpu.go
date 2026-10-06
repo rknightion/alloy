@@ -4,25 +4,36 @@ import (
 	"log/slog"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/grafana/alloy/internal/agentless"
 )
 
-const cpuSubsystem = "cpu"
+const (
+	cpuSubsystem = "cpu"
+	cpuStateTTL  = time.Hour
+)
 
 func init() {
 	Register(Registration{Name: cpuSubsystem, OS: "linux", DefaultEnabled: true, Factory: newCPUCollector})
 }
 
+type cpuTargetState struct {
+	times     map[int64]cpuTimes
+	updatedAt time.Time
+}
+
 type cpuCollector struct {
-	mu    sync.Mutex
-	stats map[agentless.Target]map[int64]cpuTimes
+	mu         sync.Mutex
+	stats      map[agentless.Target]cpuTargetState
+	now        func() time.Time
+	nextExpiry time.Time
 }
 
 func newCPUCollector(_ Configs, _ *slog.Logger) (agentless.Collector, error) {
-	return &cpuCollector{stats: make(map[agentless.Target]map[int64]cpuTimes)}, nil
+	return &cpuCollector{stats: make(map[agentless.Target]cpuTargetState), now: time.Now}, nil
 }
 
 // Name implements agentless.Collector.
@@ -40,6 +51,25 @@ var (
 
 // Update implements agentless.Collector.
 func (c *cpuCollector) Update(target agentless.Target, in agentless.Input, ch chan<- prometheus.Metric) error {
+	// Prune on every Update, including failed reads of unrelated targets.
+	// No background worker is needed when scraping stops altogether.
+	c.mu.Lock()
+	now := c.now()
+	// Most scrapes cannot expire anything. Only scan the target map when
+	// its earliest known expiry is due, rather than on every target scrape.
+	if !c.nextExpiry.IsZero() && !now.Before(c.nextExpiry) {
+		c.nextExpiry = time.Time{}
+		for target, state := range c.stats {
+			expires := state.updatedAt.Add(cpuStateTTL)
+			if !now.Before(expires) {
+				delete(c.stats, target)
+			} else if c.nextExpiry.IsZero() || expires.Before(c.nextExpiry) {
+				c.nextExpiry = expires
+			}
+		}
+	}
+	c.mu.Unlock()
+
 	parsed, err := readProcStat(in)
 	if err != nil {
 		return err
@@ -48,7 +78,7 @@ func (c *cpuCollector) Update(target agentless.Target, in agentless.Input, ch ch
 	// Build a per-call snapshot under the lock, then release it before sending
 	// metrics so a slow consumer cannot block unrelated targets.
 	c.mu.Lock()
-	previous := c.stats[target]
+	previous := c.stats[target].times
 	for id, next := range parsed.cpus {
 		old := previous[id]
 		// Match node_exporter's hotplug heuristic, including the exact boundary.
@@ -64,7 +94,12 @@ func (c *cpuCollector) Update(target agentless.Target, in agentless.Input, ch ch
 	}
 	// Replacing the map also removes every offline CPU, even when the number
 	// of CPUs stays constant but the set of IDs changes.
-	c.stats[target] = parsed.cpus
+	updatedAt := c.now()
+	c.stats[target] = cpuTargetState{times: parsed.cpus, updatedAt: updatedAt}
+	expires := updatedAt.Add(cpuStateTTL)
+	if c.nextExpiry.IsZero() || expires.Before(c.nextExpiry) {
+		c.nextExpiry = expires
+	}
 	c.mu.Unlock()
 
 	for id, times := range parsed.cpus {

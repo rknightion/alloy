@@ -1,6 +1,7 @@
 package collectors
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -62,6 +63,43 @@ func TestCollectorsRejectFailedReads(t *testing.T) {
 				}
 				if len(ch) != 0 {
 					t.Fatal("metrics emitted before parse succeeded")
+				}
+			})
+		}
+	}
+}
+
+func TestProcStatCPULimits(t *testing.T) {
+	var boundary strings.Builder
+	for i := 0; i < 8192; i++ {
+		fmt.Fprintf(&boundary, "cpu%d 1 2 3 4\n", i)
+	}
+	for name, text := range map[string]string{
+		"line boundary": boundary.String(),
+		"ID boundary":   "cpu65535 1 2 3 4\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := readProcStat(statInput(text)); err != nil {
+				t.Fatalf("valid boundary rejected: %v", err)
+			}
+		})
+	}
+	cpu, _ := newCPUCollector(Configs{}, nil)
+	stat, _ := newStatCollector(Configs{}, nil)
+	for _, c := range []agentless.Collector{cpu, stat} {
+		for name, text := range map[string]string{
+			"8193 lines":      boundary.String() + "cpu8192 1 2 3 4\n",
+			"duplicate lines": strings.Repeat("cpu0 1 2 3 4\n", 8193),
+			"aggregate lines": strings.Repeat("cpu 1 2 3 4\n", 8193),
+			"ID 65536":        "cpu65536 1 2 3 4\n",
+		} {
+			t.Run(c.Name()+"/"+name, func(t *testing.T) {
+				ch := make(chan prometheus.Metric, 81930)
+				if err := c.Update(agentless.Target{}, statInput(text), ch); err == nil {
+					t.Error("excess CPU input accepted")
+				}
+				if len(ch) != 0 {
+					t.Error("metrics emitted for excess CPU input")
 				}
 			})
 		}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/grafana/alloy/internal/agentless"
 	"github.com/grafana/alloy/internal/agentless/agentlesstest"
@@ -115,6 +116,46 @@ func TestCPUGuestAndReadFailures(t *testing.T) {
 	got = cpuSnapshot(t, c, target, "cpu0 100 200 300 400\n")
 	if got["cpu/0/user"] != 1 {
 		t.Fatalf("failed scrape mutated state: %v", got)
+	}
+}
+
+func TestCPUStateExpiration(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("failed-update=%t", failed), func(t *testing.T) {
+			collector, _ := newCPUCollector(Configs{}, nil)
+			c := collector.(*cpuCollector)
+			now := time.Unix(1000, 0)
+			c.now = func() time.Time { return now }
+			stale := agentless.Target{Address: "removed", Auth: "a"}
+			active := agentless.Target{Address: "active", Auth: "b"}
+			cpuSnapshot(t, c, stale, "cpu0 9000 0 0 1000\n")
+			now = now.Add(30 * time.Minute)
+			cpuSnapshot(t, c, active, "cpu0 8000 0 0 1000\n")
+			now = now.Add(30*time.Minute - time.Nanosecond)
+			cpuSnapshot(t, c, active, "cpu0 1 0 0 1000\n")
+			if _, ok := c.stats[stale]; !ok {
+				t.Fatal("state expired before one hour")
+			}
+			now = now.Add(2 * time.Nanosecond)
+			if failed {
+				if err := c.Update(active, statInput("ctxt bad\n"), make(chan prometheus.Metric, 100)); err == nil {
+					t.Fatal("malformed input accepted")
+				}
+			} else {
+				cpuSnapshot(t, c, active, "cpu0 1 0 0 1000\n")
+			}
+			if _, ok := c.stats[stale]; ok {
+				t.Error("removed target state survived an Update after one hour")
+			}
+			got := cpuSnapshot(t, c, stale, "cpu0 1 0 0 1000\n")
+			if got["cpu/0/user"] != 0.01 {
+				t.Errorf("expired counters resurrected: %v", got)
+			}
+			got = cpuSnapshot(t, c, active, "cpu0 1 0 0 1000\n")
+			if got["cpu/0/user"] != 80 {
+				t.Errorf("active target counters lost: %v", got)
+			}
+		})
 	}
 }
 

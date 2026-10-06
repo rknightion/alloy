@@ -60,6 +60,11 @@ func (c *statCollector) Update(_ agentless.Target, in agentless.Input, ch chan<-
 // kernel's scheduling tick frequency. Guest time is included in user/nice.
 type cpuTimes [10]float64
 
+const (
+	maxProcStatCPULines = 8192
+	maxProcStatCPUID    = 65535
+)
+
 type procStat struct {
 	cpus   map[int64]cpuTimes
 	values map[string]uint64
@@ -76,6 +81,7 @@ func readProcStat(in agentless.Input) (procStat, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	// The interrupt line can be much larger than Scanner's default limit.
 	scanner.Buffer(make([]byte, 8192), 1024*1024)
+	cpuLines := 0
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		if len(fields) == 0 {
@@ -94,10 +100,16 @@ func readProcStat(in agentless.Input) (procStat, error) {
 			return procStat{}, fmt.Errorf("/proc/stat: missing value for %s", key)
 		}
 		if isCPU {
+			// Count lines, not unique IDs: duplicates and aggregate lines must
+			// not bypass the parsing-work bound.
+			cpuLines++
+			if cpuLines > maxProcStatCPULines {
+				return procStat{}, fmt.Errorf("/proc/stat: CPU line limit exceeded (%d)", maxProcStatCPULines)
+			}
 			id := int64(-1)
 			if key != cpuSubsystem {
 				id, err = strconv.ParseInt(strings.TrimPrefix(key, cpuSubsystem), 10, 64)
-				if err != nil || id < 0 {
+				if err != nil || id < 0 || id > maxProcStatCPUID {
 					return procStat{}, fmt.Errorf("/proc/stat: invalid CPU ID %q", key)
 				}
 			}
