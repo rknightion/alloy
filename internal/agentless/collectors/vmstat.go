@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"regexp"
 	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,9 +17,17 @@ func init() {
 	Register(Registration{Name: "vmstat", OS: "linux", DefaultEnabled: true, Factory: newVmstatCollector})
 }
 
-// Match node_exporter's default collector.vmstat.fields flag. No target field
-// names are retained until they pass this filter and the frozen family cap.
-var vmstatFields = regexp.MustCompile(`^(oom_kill|pgpg|pswp|pg.*fault).*`)
+// Match node_exporter's default collector.vmstat.fields pattern,
+// ^(oom_kill|pgpg|pswp|pg.*fault).*, without regexp's pooled scratch allocations.
+// Scanner keys cannot contain newlines, so pg.*fault is a prefix and substring
+// check. No target field names are retained until they pass this filter and the
+// frozen family cap.
+func matchesVmstatField(key []byte) bool {
+	return bytes.HasPrefix(key, []byte("oom_kill")) ||
+		bytes.HasPrefix(key, []byte("pgpg")) ||
+		bytes.HasPrefix(key, []byte("pswp")) ||
+		(bytes.HasPrefix(key, []byte("pg")) && bytes.Contains(key[2:], []byte("fault")))
+}
 
 const maxVmstatFields = 500
 
@@ -72,7 +79,7 @@ func (c *vmstatCollector) Update(_ agentless.Target, in agentless.Input, ch chan
 			return fmt.Errorf("vmstat: invalid value")
 		}
 		rows++
-		if !vmstatFields.Match(key) {
+		if !matchesVmstatField(key) {
 			continue
 		}
 		if len(seen) == maxVmstatFields {
