@@ -25,6 +25,8 @@ var netstatFields = regexp.MustCompile(`^(.*_(InErrors|InErrs)|Ip_Forwarding|Ip(
 // The central Scraper cannot bound a collector's pre-send parsing state.
 const maxNetstatFields = 500
 
+const netstatSNMP6Path = "/proc/net/snmp6"
+
 type netstatCollector struct{}
 
 func newNetstatCollector(_ Configs, _ *slog.Logger) (agentless.Collector, error) {
@@ -34,7 +36,7 @@ func newNetstatCollector(_ Configs, _ *slog.Logger) (agentless.Collector, error)
 func (c *netstatCollector) Name() string { return "netstat" }
 
 func (c *netstatCollector) Reads() []agentless.Read {
-	return []agentless.Read{agentless.FileRead("/proc/net/snmp"), agentless.FileRead("/proc/net/snmp6"), agentless.FileRead("/proc/net/netstat")}
+	return []agentless.Read{agentless.FileRead("/proc/net/snmp"), agentless.FileRead(netstatSNMP6Path), agentless.FileRead("/proc/net/netstat")}
 }
 
 func (c *netstatCollector) Update(_ agentless.Target, in agentless.Input, ch chan<- prometheus.Metric) error {
@@ -85,7 +87,7 @@ func (c *netstatCollector) Update(_ agentless.Target, in agentless.Input, ch cha
 		for scanner.Scan() {
 			rows++
 			// FieldsSeq avoids allocating a slice proportional to a hostile line.
-			if read.Path == "/proc/net/snmp6" {
+			if read.Path == netstatSNMP6Path {
 				var key string
 				count := 0
 				for field := range strings.FieldsSeq(scanner.Text()) {
