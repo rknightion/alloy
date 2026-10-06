@@ -42,7 +42,6 @@ const (
 )
 
 var (
-	mdadmStatus     = regexp.MustCompile(`^(\d+) blocks .*\[(\d+)/(\d+)\] \[([U_]+)\]$`)
 	mdadmSyncBlocks = regexp.MustCompile(`\((\d+)/(\d+)\)`)
 	mdadmSyncPct    = regexp.MustCompile(`=\s*([0-9.]+)%`)
 	mdadmSyncFinish = regexp.MustCompile(`finish=([0-9.]+)min`)
@@ -205,13 +204,13 @@ func parseMdadm(output []byte) ([]mdadmDevice, error) {
 			}
 			current.blocks, current.synced = size, size
 			if !current.striped && current.state != 1 {
-				match := mdadmStatus.FindSubmatch(line)
-				if len(match) != 5 {
+				totalRaw, activeRaw, states, ok := mdadmStatusFields(line)
+				if !ok {
 					return fail()
 				}
-				total, e1 := mdadmInt(match[2])
-				active, e2 := mdadmInt(match[3])
-				if e1 != nil || e2 != nil || active > total || int64(len(match[4])) != total {
+				total, e1 := mdadmInt(totalRaw)
+				active, e2 := mdadmInt(activeRaw)
+				if e1 != nil || e2 != nil || active > total || int64(len(states)) != total {
 					return fail()
 				}
 				current.total, current.active = total, active
@@ -276,6 +275,49 @@ func parseMdadm(output []byte) ([]mdadmDevice, error) {
 		return fail()
 	}
 	return devices, nil
+}
+
+// Match ^(\d+) blocks .*\[(\d+)/(\d+)\] \[([U_]+)\]$ without
+// regexp's pooled scratch or capture allocations. Scanner lines contain no LF;
+// the anchored suffix fixes the captures even with optional metadata in .*.
+func mdadmStatusFields(line []byte) (total, active, states []byte, ok bool) {
+	size, rest, found := bytes.Cut(line, []byte(" blocks "))
+	if !found || len(rest) == 0 || rest[len(rest)-1] != ']' {
+		return nil, nil, nil, false
+	}
+	i := bytes.LastIndex(rest, []byte("] ["))
+	if i < 0 {
+		return nil, nil, nil, false
+	}
+	states = rest[i+3 : len(rest)-1]
+	if len(states) == 0 {
+		return nil, nil, nil, false
+	}
+	for _, state := range states {
+		if state != 'U' && state != '_' {
+			return nil, nil, nil, false
+		}
+	}
+	counts := rest[:i]
+	i = bytes.LastIndexByte(counts, '[')
+	if i < 0 {
+		return nil, nil, nil, false
+	}
+	total, active, found = bytes.Cut(counts[i+1:], []byte("/"))
+	if !found {
+		return nil, nil, nil, false
+	}
+	for _, raw := range [...][]byte{size, total, active} {
+		if len(raw) == 0 {
+			return nil, nil, nil, false
+		}
+		for _, digit := range raw {
+			if digit < '0' || digit > '9' {
+				return nil, nil, nil, false
+			}
+		}
+	}
+	return total, active, states, true
 }
 
 func mdadmInt(raw []byte) (int64, error) {
