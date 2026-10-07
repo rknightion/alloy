@@ -1,0 +1,3 @@
+# HELP node_nvme_info Non-numeric data from /sys/class/nvme/<device>, value is always 1.
+# TYPE node_nvme_info gauge
+node_nvme_info{device="nvme0",firmware_revision="1B2QEXP7",model="Samsung SSD 970 PRO 512GB",serial="S680HF8N190894I",state="live"} 1
