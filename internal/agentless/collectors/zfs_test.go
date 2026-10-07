@@ -69,6 +69,24 @@ func TestZFSRegistrationAndReads(t *testing.T) {
 	}
 }
 
+func TestZFSReadsIndependent(t *testing.T) {
+	c, in := zfsFixture(t)
+	first, second := c.Reads(), c.Reads()
+	want := append([]agentless.Read(nil), second...)
+	defer copy(first, want) // Restore descriptors even when testing an exposed-slice mutant.
+	for index := range first {
+		first[index] = agentless.Read{ID: "changed", Path: "/changed", Argv: []string{"changed"}}
+	}
+	ch := make(chan prometheus.Metric, 500)
+	require.NoError(t, c.Update(agentless.Target{}, in, ch), "caller mutation must not affect fixed Update reads")
+	require.Len(t, ch, 258)
+	require.Equal(t, want, second)
+	require.Equal(t, want, c.Reads())
+	for _, read := range second {
+		require.Nil(t, read.Argv, "fixed file reads have no mutable arguments")
+	}
+}
+
 func TestZFSReadFailures(t *testing.T) {
 	for name, result := range map[string]agentless.Result{
 		"missing": {NotExist: true, ExitStatus: 1}, "nonzero": {ExitStatus: 2}, "timeout": {TimedOut: true}, "truncated": {Truncated: true},

@@ -34,22 +34,27 @@ var zfsFiles = [...]struct{ subsystem, file string }{
 	{"zfs_xuio", "xuio_stats"}, {"zfs_zfetch", "zfetchstats"}, {"zfs_zil", "zil"},
 }
 
-func (*zfsCollector) Reads() []agentless.Read {
-	reads := make([]agentless.Read, 0, len(zfsFiles))
-	for _, file := range zfsFiles {
-		reads = append(reads, agentless.FileRead("/proc/spl/kstat/zfs/"+file.file))
+// File reads contain no mutable arguments; keep these descriptors private.
+var zfsReads = func() [len(zfsFiles)]agentless.Read {
+	var reads [len(zfsFiles)]agentless.Read
+	for index, file := range zfsFiles {
+		reads[index] = agentless.FileRead("/proc/spl/kstat/zfs/" + file.file)
 	}
 	return reads
+}()
+
+func (*zfsCollector) Reads() []agentless.Read {
+	return append([]agentless.Read(nil), zfsReads[:]...)
 }
 
 // Count even ignored types before retention; no labels and at most 500 families.
 const maxZFSRows = 500
 
-func (c *zfsCollector) Update(_ agentless.Target, in agentless.Input, ch chan<- prometheus.Metric) error {
+func (*zfsCollector) Update(_ agentless.Target, in agentless.Input, ch chan<- prometheus.Metric) error {
 	var metrics []prometheus.Metric
 	seen := make(map[string]bool)
 	rows := 0
-	for index, read := range c.Reads() {
+	for index, read := range zfsReads {
 		result := in[read.ID]
 		if result.NotExist && !result.TimedOut && !result.Truncated {
 			continue
