@@ -1,0 +1,5 @@
+# HELP node_arp_entries ARP entries by device
+# TYPE node_arp_entries gauge
+node_arp_entries{device="eth0"} 3
+node_arp_entries{device="eth1"} 3
+node_arp_entries{device="nope"} 1
