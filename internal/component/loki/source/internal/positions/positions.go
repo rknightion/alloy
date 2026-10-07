@@ -5,6 +5,7 @@ package positions
 // same place in case of a restart.
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,9 @@ const (
 	cursorKeyPrefix  = "cursor-"
 	journalKeyPrefix = "journal-"
 )
+
+// ErrEntryLimit indicates that a prefix snapshot exceeds its entry limit.
+var ErrEntryLimit = errors.New("positions: entry limit exceeded")
 
 // Config describes where to get position information from.
 type Config struct {
@@ -78,6 +82,12 @@ type Positions interface {
 	// FileTarget writes an integer offset. Use Get to read the integer
 	// offset.
 	GetString(path, labels string) string
+	// LookupString returns the stored string and whether the entry exists.
+	LookupString(path, labels string) (value string, present bool)
+	// SnapshotPrefix returns a caller-owned copy of entries whose paths begin
+	// with prefix. An empty prefix or nonpositive maxEntries is invalid.
+	// If more than maxEntries match, it returns nil and ErrEntryLimit.
+	SnapshotPrefix(prefix string, maxEntries int) (map[Entry]string, error)
 	// Get returns how far we've read through a file. Returns an error
 	// if the value stored for the file is not an integer.
 	Get(path, labels string) (int64, error)
@@ -257,6 +267,41 @@ func (p *positions) GetString(path, labels string) string {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	return p.positions[Entry{path, labels}]
+}
+
+func (p *positions) LookupString(path, labels string) (string, bool) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	value, present := p.positions[Entry{path, labels}]
+	return value, present
+}
+
+func (p *positions) SnapshotPrefix(prefix string, maxEntries int) (map[Entry]string, error) {
+	if prefix == "" || maxEntries <= 0 {
+		return nil, errors.New("positions: nonempty prefix and positive entry limit required")
+	}
+
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	// Count before allocating so overflow never allocates a partial snapshot.
+	count := 0
+	for entry := range p.positions {
+		if strings.HasPrefix(entry.Path, prefix) {
+			if count == maxEntries {
+				return nil, ErrEntryLimit
+			}
+			count++
+		}
+	}
+
+	snapshot := make(map[Entry]string, count)
+	for entry, value := range p.positions {
+		if strings.HasPrefix(entry.Path, prefix) {
+			snapshot[entry] = value
+		}
+	}
+	return snapshot, nil
 }
 
 func (p *positions) Get(path, labels string) (int64, error) {

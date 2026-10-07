@@ -18,6 +18,12 @@ type mockPositions struct{}
 
 func (m *mockPositions) GetString(path, labels string) string { return "" }
 
+func (m *mockPositions) LookupString(path, labels string) (string, bool) { return "", false }
+
+func (m *mockPositions) SnapshotPrefix(prefix string, maxEntries int) (map[positions.Entry]string, error) {
+	return positions.NewNop().SnapshotPrefix(prefix, maxEntries)
+}
+
 func (m *mockPositions) Get(path, labels string) (int64, error) { return 0, nil }
 
 func (m *mockPositions) PutString(path, labels, pos string) {}
