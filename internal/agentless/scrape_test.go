@@ -329,6 +329,256 @@ node_scrape_collector_success{collector="later"} 0
 	}
 }
 
+func TestReadlinkValidation(t *testing.T) {
+	require.NoError(t, agentless.CommandRead("readlink", "-f", "/sys/class/hwmon/hwmon0/device").Validate())
+	for _, argv := range [][]string{
+		{"readlink"}, {"readlink", "/sys/device"}, {"readlink", "-e", "/sys/device"},
+		{"readlink", "-f", "relative"}, {"readlink", "-f", "/sys/../device"},
+		{"readlink", "-f", "/sys/a..b"}, {"readlink", "-f", "/sys/a:b"},
+		{"readlink", "-f", "/sys/a=b"}, {"readlink", "-f", "/sys/a+b"},
+		{"readlink", "-f", "/sys/a b"}, {"readlink", "-f", "/sys/a\n"},
+		{"readlink", "-f", "/sys/device", "-n"}, {"/usr/bin/readlink", "-f", "/sys/device"},
+	} {
+		require.Error(t, agentless.CommandRead(argv...).Validate(), "argv=%q", argv)
+	}
+}
+
+func TestReadlinkPhaseOneRejected(t *testing.T) {
+	runner := &agentlesstest.FakeRunner{}
+	_, err := agentless.NewScraper(runner, []agentless.Collector{badReads{[]agentless.Read{agentless.CommandRead("readlink", "-f", "/sys/device")}}}, nil)
+	require.Error(t, err)
+	require.Zero(t, runner.Calls())
+}
+
+func TestReadlinkOutput(t *testing.T) {
+	r := agentless.CommandRead("readlink", "-f", "/sys/device")
+	for _, tc := range []struct {
+		name   string
+		output string
+		valid  bool
+	}{
+		{"line", "/sys/devices/chip\n", true},
+		{"no-newline", "/sys/devices/chip", true},
+		{"boundary", "/" + strings.Repeat("a", 4095) + "\n", true},
+		{"over", "/" + strings.Repeat("a", 4096) + "\n", false},
+		{"multiline", "/sys/a\n/sys/b\n", false},
+		{"blank-line", "/sys/a\n\n", false},
+		{"empty", "", false},
+		{"relative", "sys/a\n", false},
+		{"traversal", "/sys/../a\n", false},
+		{"unsafe", "/sys/a;b\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := agentless.Input{r.ID: {Read: r, Output: []byte(tc.output)}}
+			b, err := in.Output(r)
+			if tc.valid {
+				require.NoError(t, err)
+				require.Equal(t, tc.output, string(b))
+			} else {
+				require.Error(t, err)
+				require.Nil(t, b, "no partial line is exposed")
+			}
+		})
+	}
+}
+
+func TestReadlinkScrapePhases(t *testing.T) {
+	link := agentless.CommandRead("readlink", "-f", "/sys/device")
+	for _, phase := range []int{2, 3} {
+		for _, output := range []string{"/sys/chip\n", "/sys/a\n/sys/b\n", "/" + strings.Repeat("a", 4096) + "\n"} {
+			t.Run(fmt.Sprintf("phase%d-bytes%d", phase, len(output)), func(t *testing.T) {
+				updates, deepCalls, goodUpdates := 0, 0, 0
+				c := capDeepCollector("link", nil, nil, &updates)
+				c.expand = func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+					if phase == 2 {
+						return []agentless.Read{link}, nil
+					}
+					return nil, nil
+				}
+				c.deep = func(_ agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+					deepCalls++
+					if phase == 3 {
+						return []agentless.Read{link}, nil
+					}
+					b, err := in.Output(link)
+					require.NoError(t, err)
+					require.Equal(t, output, string(b))
+					return nil, nil
+				}
+				runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{link.ID: {Output: []byte(output)}}}}
+				s, err := agentless.NewScraper(runner, []agentless.Collector{c, capDeepCollector("good", nil, nil, &goodUpdates)}, nil)
+				require.NoError(t, err)
+				result, err := s.Scrape(t.Context(), agentless.Target{})
+				require.NoError(t, err)
+				valid := output == "/sys/chip\n"
+				want := 0.0
+				if valid {
+					want = 1
+				}
+				assertCollectorSuccess(t, result, map[string]float64{"link": want, "good": 1})
+				require.Equal(t, int(want), updates)
+				require.Equal(t, 1, goodUpdates)
+				if phase == 2 && !valid {
+					require.Zero(t, deepCalls)
+				} else {
+					require.Equal(t, 1, deepCalls)
+				}
+				require.Len(t, runner.batches, 2)
+				require.Equal(t, []agentless.Read{link}, runner.batches[1])
+			})
+		}
+	}
+}
+
+func TestReadlinkExpansionRejectedAtomically(t *testing.T) {
+	for _, phase := range []int{2, 3} {
+		for _, read := range []agentless.Read{
+			agentless.CommandRead("readlink", "-f", "relative"),
+			agentless.CommandRead("readlink", "-f", "/sys/a:b"),
+			agentless.CommandRead("readlink", "-f", "/sys/../a"),
+			agentless.CommandRead("readlink", "-f", "/sys/a", "-n"),
+		} {
+			updates := 0
+			second, third := []agentless.Read{agentless.FileRead("/sys/valid"), read}, []agentless.Read(nil)
+			if phase == 3 {
+				second, third = nil, second
+			}
+			c := capDeepCollector("bad", second, third, &updates)
+			runner := &recordingRunner{runner: &agentlesstest.FakeRunner{}}
+			s, err := agentless.NewScraper(runner, []agentless.Collector{c}, nil)
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{})
+			require.NoError(t, err)
+			assertCollectorSuccess(t, result, map[string]float64{"bad": 0})
+			require.Zero(t, updates)
+			require.Len(t, runner.batches, 1, "no read in rejected expansion reaches Runner")
+		}
+	}
+}
+
+func TestReadlinkListingBudget(t *testing.T) {
+	for _, phase := range []int{2, 3} {
+		for _, n := range []int{64, 65} {
+			updates := 0
+			link := agentless.CommandRead("readlink", "-f", "/sys/device")
+			links := make([]agentless.Read, n)
+			for i := range links {
+				links[i] = link
+			}
+			second, third := links, []agentless.Read(nil)
+			if phase == 3 {
+				second, third = nil, links
+			}
+			c := capDeepCollector("links", second, third, &updates)
+			runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{link.ID: {Output: []byte("/sys/chip\n")}}}}
+			s, err := agentless.NewScraper(runner, []agentless.Collector{c}, nil)
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{})
+			require.NoError(t, err)
+			want := 0.0
+			if n == 64 {
+				want = 1
+			}
+			assertCollectorSuccess(t, result, map[string]float64{"links": want})
+			require.Equal(t, int(want), updates)
+			require.Len(t, runner.batches, 1+int(want))
+		}
+	}
+}
+
+func TestReadlinkExpanderOnly(t *testing.T) {
+	link := agentless.CommandRead("readlink", "-f", "/sys/device")
+	for _, n := range []int{64, 65} {
+		updates := 0
+		reads := make([]agentless.Read, n)
+		for i := range reads {
+			reads[i] = link
+		}
+		c := capDeepCollector("links", reads, nil, &updates).expandingCollector
+		runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{link.ID: {Output: []byte("/sys/chip\n")}}}}
+		s, err := agentless.NewScraper(runner, []agentless.Collector{c}, nil)
+		require.NoError(t, err)
+		result, err := s.Scrape(t.Context(), agentless.Target{})
+		require.NoError(t, err)
+		want := 0.0
+		if n == 64 {
+			want = 1
+		}
+		assertCollectorSuccess(t, result, map[string]float64{"links": want})
+		require.Equal(t, int(want), updates)
+		require.Len(t, runner.batches, 1+int(want))
+	}
+}
+
+func TestReadlinkCombinedBudgets(t *testing.T) {
+	link := agentless.CommandRead("readlink", "-f", "/sys/device")
+	for _, n := range []int{1, 2} {
+		updates := 0
+		second := make([]agentless.Read, 63)
+		for i := range second {
+			second[i] = agentless.CommandRead("ls", "-1", "/sys/devices")
+		}
+		third := make([]agentless.Read, n)
+		for i := range third {
+			third[i] = link
+		}
+		runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{link.ID: {Output: []byte("/sys/chip\n")}}}}
+		s, err := agentless.NewScraper(runner, []agentless.Collector{capDeepCollector("links", second, third, &updates)}, nil)
+		require.NoError(t, err)
+		result, err := s.Scrape(t.Context(), agentless.Target{})
+		require.NoError(t, err)
+		want := 0.0
+		if n == 1 {
+			want = 1
+		}
+		assertCollectorSuccess(t, result, map[string]float64{"links": want})
+		require.Len(t, runner.batches, 2+int(want), "listings and readlink share the budget, even when deduplicated")
+	}
+	for _, phase := range []int{2, 3} {
+		for _, n := range []int{1023, 1024} {
+			updates := 0
+			second, third := generatedReads("second", n), []agentless.Read{link}
+			if phase == 2 {
+				second, third = append(second, link), nil
+			}
+			runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{link.ID: {Output: []byte("/sys/chip\n")}}}}
+			s, err := agentless.NewScraper(runner, []agentless.Collector{capDeepCollector("links", second, third, &updates)}, nil)
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{})
+			require.NoError(t, err)
+			want := 0.0
+			if n == 1023 {
+				want = 1
+			}
+			assertCollectorSuccess(t, result, map[string]float64{"links": want})
+			require.Equal(t, int(want), updates, "readlink counts against the 1024 combined read cap")
+		}
+	}
+	for _, n := range []int{4095, 4096} {
+		var collectors []agentless.Collector
+		updates := make([]int, 5)
+		for i := range 4 {
+			count := 1024
+			if i == 3 {
+				count = n - 3072
+			}
+			collectors = append(collectors, capDeepCollector(fmt.Sprintf("files%d", i), generatedReads(fmt.Sprintf("files%d", i), count), nil, &updates[i]))
+		}
+		collectors = append(collectors, capDeepCollector("links", nil, []agentless.Read{link}, &updates[4]))
+		runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{link.ID: {Output: []byte("/sys/chip\n")}}}}
+		s, err := agentless.NewScraper(runner, collectors, nil)
+		require.NoError(t, err)
+		result, err := s.Scrape(t.Context(), agentless.Target{})
+		require.NoError(t, err)
+		want := 0.0
+		if n == 4095 {
+			want = 1
+		}
+		assertCollectorSuccess(t, result, map[string]float64{"files0": 1, "files1": 1, "files2": 1, "files3": 1, "links": want})
+		require.Equal(t, int(want), updates[4], "readlink counts against the 4096 scrape read cap")
+	}
+}
+
 func TestValidateRejectsAssignmentAsCommand(t *testing.T) {
 	require.Error(t, agentless.CommandRead("PATH=/tmp", "df").Validate())
 	require.Error(t, agentless.CommandRead("cat", "/proc/../etc/shadow").Validate())

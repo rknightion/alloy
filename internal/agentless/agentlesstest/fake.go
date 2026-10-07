@@ -73,7 +73,9 @@ func (f *FakeRunner) Calls() int {
 // which maps a Read.ID to a file holding that command's output. A file that
 // does not exist yields exit status 1 and NotExist. Commands of the form
 // ls -1 /fixed/directory list the fixture directory (excluding hidden entries),
-// unless commands provides an explicit output file. Expanded reads are loaded
+// unless commands provides an explicit output file. readlink -f /absolute/path
+// resolves fixture symlinks within root and returns a target-root absolute path;
+// commands can also override its output. Expanded reads are loaded
 // on demand, so callers need only supply the fixed phase-one reads.
 func FromFS(root string, commands map[string]string, reads []agentless.Read) (*FakeRunner, error) {
 	f := &FakeRunner{Results: make(map[string]agentless.Result, len(reads)), root: root, commands: commands, fromFS: true}
@@ -99,6 +101,8 @@ func fixtureResult(root string, commands map[string]string, r agentless.Read) (a
 		name = filepath.Join(root, filepath.FromSlash(r.Path))
 	case commands[r.ID] != "":
 		name = commands[r.ID]
+	case len(r.Argv) == 3 && r.Argv[0] == "readlink":
+		return fixtureReadlink(root, r)
 	case len(r.Argv) == 3 && r.Argv[0] == "ls" && r.Argv[1] == "-1" && strings.HasPrefix(r.Argv[2], "/"):
 		entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(r.Argv[2])))
 		if os.IsNotExist(err) {

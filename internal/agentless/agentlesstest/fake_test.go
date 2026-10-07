@@ -62,6 +62,42 @@ func TestFromFSSecondLevelListingAndFile(t *testing.T) {
 	require.Equal(t, 3, runner.Calls())
 }
 
+func TestFromFSReadlink(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sys/chip"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sys/class"), 0o700))
+	require.NoError(t, os.Symlink("../chip", filepath.Join(root, "sys/class/relative")))
+	require.NoError(t, os.Symlink("/sys/class/relative", filepath.Join(root, "sys/class/absolute")))
+	require.NoError(t, os.Symlink("loop", filepath.Join(root, "sys/class/loop")))
+	runner, err := agentlesstest.FromFS(root, nil, nil)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		path, output string
+		failed       bool
+	}{
+		{"/sys/chip", "/sys/chip\n", false},
+		{"/sys/class/relative", "/sys/chip\n", false},
+		{"/sys/class/absolute", "/sys/chip\n", false},
+		{"/sys/class/absolute/missing", "/sys/chip/missing\n", false},
+		{"/missing/child", "", true},
+		{"/sys/class/loop", "", true},
+	} {
+		r := agentless.CommandRead("readlink", "-f", tc.path)
+		results, err := runner.Run(t.Context(), agentless.Target{}, []agentless.Read{r})
+		require.NoError(t, err)
+		require.Equal(t, tc.output, string(results[0].Output))
+		require.Equal(t, tc.failed, results[0].ExitStatus != 0)
+	}
+	output := filepath.Join(root, "override")
+	require.NoError(t, os.WriteFile(output, []byte("/overridden\n"), 0o600))
+	r := agentless.CommandRead("readlink", "-f", "/sys/chip")
+	runner, err = agentlesstest.FromFS(root, map[string]string{r.ID: output}, nil)
+	require.NoError(t, err)
+	results, err := runner.Run(t.Context(), agentless.Target{}, []agentless.Read{r})
+	require.NoError(t, err)
+	require.Equal(t, "/overridden\n", string(results[0].Output))
+}
+
 func TestFromFSExplicitListingOutput(t *testing.T) {
 	root := t.TempDir()
 	output := filepath.Join(root, "output")

@@ -46,7 +46,8 @@ const MaxExpandedReads = 1024
 // its entirety, with no metrics exported from it.
 const MaxExpandedReadsPerScrape = 4096
 
-// MaxDeepListings bounds the phase-two listings returned by one DeepExpander.
+// MaxDeepListings bounds phase-two listings plus readlink reads across both
+// expansion phases for one collector.
 const MaxDeepListings = 64
 
 // Scraper runs the fixed batch and up to two expansion batches per scrape.
@@ -69,6 +70,9 @@ func NewScraper(runner Runner, collectors []Collector, logger *slog.Logger) (*Sc
 		for _, r := range c.Reads() {
 			if err := r.Validate(); err != nil {
 				return nil, fmt.Errorf("collector %s: %w", c.Name(), err)
+			}
+			if isReadlinkCommand(r) {
+				return nil, fmt.Errorf("collector %s: readlink is only allowed in expansion phases", c.Name())
 			}
 			if prev, ok := seen[r.ID]; ok {
 				if !sameRead(prev, r) {
@@ -109,6 +113,8 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 	}
 	var expanded []Read
 	counts := make([]int, len(s.collectors))
+	listingCounts := make([]int, len(s.collectors))
+	links := make([][]Read, len(s.collectors))
 	participants := make([]bool, len(s.collectors))
 	for i, c := range s.collectors {
 		e, ok := c.(Expander)
@@ -119,8 +125,9 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 		if err == nil && len(reads) > MaxExpandedReads {
 			err = fmt.Errorf("collector expanded read limit exceeded")
 		}
-		if _, deep := c.(DeepExpander); deep && err == nil {
-			err = validateDeepListings(reads)
+		if err == nil {
+			_, deep := c.(DeepExpander)
+			listingCounts[i], err = validateDeepListings(reads, deep)
 		}
 		// Validate atomically: a bad final read must not schedule any of this
 		// collector's reads or consume capacity needed by another collector.
@@ -159,6 +166,9 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 		expanded = append(expanded, additional...)
 		counts[i] = len(reads)
 		for _, read := range reads {
+			if isReadlink(read) {
+				links[i] = append(links[i], read)
+			}
 			if _, present := in[read.ID]; !present {
 				participants[i] = true
 			}
@@ -180,6 +190,7 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 			}
 		}
 	}
+	checkReadlinks(in, links, failures)
 	var third []Read
 	participants = make([]bool, len(s.collectors))
 	for i, c := range s.collectors {
@@ -191,6 +202,7 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 		if err == nil && counts[i]+len(reads) > MaxExpandedReads {
 			err = fmt.Errorf("collector expanded read limit exceeded")
 		}
+		readlinks := 0
 		var additional []Read
 		local := make(map[string]Read)
 		if err == nil {
@@ -198,8 +210,11 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 				if err = read.Validate(); err != nil {
 					break
 				}
-				if read.Path == "" {
-					err = fmt.Errorf("deep expansion must return only file reads")
+				if isReadlink(read) {
+					readlinks++
+				}
+				if read.Path == "" && !isReadlink(read) {
+					err = fmt.Errorf("deep expansion must return only file or readlink reads")
 					break
 				}
 				prev, exists := seen[read.ID]
@@ -217,6 +232,9 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 				additional = append(additional, read)
 			}
 		}
+		if err == nil && listingCounts[i]+readlinks > MaxDeepListings {
+			err = fmt.Errorf("collector deep listing limit exceeded")
+		}
 		if err == nil && len(expanded)+len(third)+len(additional) > MaxExpandedReadsPerScrape {
 			err = fmt.Errorf("scrape expanded read limit exceeded")
 		}
@@ -229,6 +247,9 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 		}
 		third = append(third, additional...)
 		for _, read := range reads {
+			if isReadlink(read) {
+				links[i] = append(links[i], read)
+			}
 			if _, present := in[read.ID]; !present {
 				participants[i] = true
 			}
@@ -248,26 +269,45 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 			}
 		}
 	}
+	checkReadlinks(in, links, failures)
 	return &scrapeResult{ctx: ctx, collectors: s.collectors, in: in, target: target, logger: s.logger, failures: failures}, nil
 }
 
 // validateDeepListings restricts phase-two commands without changing the
 // existing Expander command contract. Validate still checks every read.
-func validateDeepListings(reads []Read) error {
+func validateDeepListings(reads []Read, deep bool) (int, error) {
 	listings := 0
 	for _, read := range reads {
-		if len(read.Argv) == 0 {
-			continue
+		if isReadlinkCommand(read) {
+			if !isReadlink(read) {
+				return 0, fmt.Errorf("expansion command must be readlink -f of a safe absolute path")
+			}
+			listings++
+		} else if deep && len(read.Argv) != 0 {
+			if len(read.Argv) != 3 || read.Argv[0] != "ls" || read.Argv[1] != "-1" || !strings.HasPrefix(read.Argv[2], "/") {
+				return 0, fmt.Errorf("deep expansion command must be ls -1 or readlink -f of an absolute path")
+			}
+			listings++
 		}
-		if len(read.Argv) != 3 || read.Argv[0] != "ls" || read.Argv[1] != "-1" || !strings.HasPrefix(read.Argv[2], "/") {
-			return fmt.Errorf("deep expansion command must be ls -1 of an absolute directory")
-		}
-		listings++
 	}
 	if listings > MaxDeepListings {
-		return fmt.Errorf("collector deep listing limit exceeded")
+		return 0, fmt.Errorf("collector deep listing limit exceeded")
 	}
-	return nil
+	return listings, nil
+}
+
+func checkReadlinks(in Input, links [][]Read, failures []error) {
+	for i, reads := range links {
+		if failures[i] != nil {
+			continue
+		}
+		for _, read := range reads {
+			if _, err := in.Output(read); err != nil {
+				failures[i] = err
+				break
+			}
+		}
+	}
 }
 
 // run validates the Runner's framing contract before exposing any results.
@@ -285,6 +325,15 @@ func (s *Scraper) run(ctx context.Context, target Target, reads []Read) (Input, 
 			return nil, fmt.Errorf("runner returned result %q at position %d, want %q", res.Read.ID, i, reads[i].ID)
 		}
 		in[res.Read.ID] = res
+		if isReadlink(reads[i]) {
+			if _, err := in.Output(reads[i]); err != nil {
+				// Do not expose a rejected line through direct Input access in
+				// another collector's expansion or Update.
+				res.Output = nil
+				res.ExitStatus = 1
+				in[res.Read.ID] = res
+			}
+		}
 	}
 	return in, nil
 }

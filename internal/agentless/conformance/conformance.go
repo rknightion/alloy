@@ -38,6 +38,8 @@ import (
 //go:embed testdata/node_exporter
 var fixtures embed.FS
 
+const readlinkCommand = "readlink"
+
 // Case describes one conformance check.
 type Case struct {
 	// Collector is the collector under test.
@@ -107,6 +109,11 @@ func Check(t testing.TB, c Case) {
 		}
 	}
 	reads := c.Collector.Reads()
+	for _, read := range reads {
+		if len(read.Argv) != 0 && read.Argv[0] == readlinkCommand {
+			t.Fatal("conformance: readlink is only allowed in expansion phases")
+		}
+	}
 	runner, err := agentlesstest.FromFS(c.Root, c.Commands, reads)
 	if err != nil {
 		t.Fatalf("conformance: read fixtures: %v", err)
@@ -134,16 +141,19 @@ func Check(t testing.TB, c Case) {
 		}
 		deep, isDeep := c.Collector.(agentless.DeepExpander)
 		listings := 0
-		var second []agentless.Read
+		var links, second []agentless.Read
 		for _, read := range expanded {
-			if isDeep && len(read.Argv) != 0 {
-				if len(read.Argv) != 3 || read.Argv[0] != "ls" || read.Argv[1] != "-1" || !strings.HasPrefix(read.Argv[2], "/") {
-					t.Fatal("conformance: deep expansion command must be ls -1 of an absolute directory")
-				}
-				listings++
-			}
 			if err := read.Validate(); err != nil {
 				t.Fatalf("conformance: invalid expanded read: %v", err)
+			}
+			if len(read.Argv) != 0 && read.Argv[0] == readlinkCommand {
+				listings++
+				links = append(links, read)
+			} else if isDeep && len(read.Argv) != 0 {
+				if len(read.Argv) != 3 || read.Argv[0] != "ls" || read.Argv[1] != "-1" || !strings.HasPrefix(read.Argv[2], "/") {
+					t.Fatal("conformance: deep expansion command must be ls -1 or readlink -f of an absolute path")
+				}
+				listings++
 			}
 			if prev, exists := seen[read.ID]; exists {
 				if prev.Path != read.Path || !slices.Equal(prev.Argv, read.Argv) {
@@ -166,6 +176,7 @@ func Check(t testing.TB, c Case) {
 				in[result.Read.ID] = result
 			}
 		}
+		checkReadlinks(t, in, links)
 		if isDeep {
 			third, err := deep.ExpandDeep(target, in)
 			if err != nil {
@@ -179,8 +190,11 @@ func Check(t testing.TB, c Case) {
 				if err := read.Validate(); err != nil {
 					t.Fatalf("conformance: invalid deep read: %v", err)
 				}
-				if read.Path == "" {
-					t.Fatal("conformance: deep expansion must return only file reads")
+				if len(read.Argv) != 0 && read.Argv[0] == readlinkCommand {
+					listings++
+					links = append(links, read)
+				} else if read.Path == "" {
+					t.Fatal("conformance: deep expansion must return only file or readlink reads")
 				}
 				if prev, exists := seen[read.ID]; exists {
 					if prev.Path != read.Path || !slices.Equal(prev.Argv, read.Argv) {
@@ -191,6 +205,9 @@ func Check(t testing.TB, c Case) {
 				seen[read.ID] = read
 				additional = append(additional, read)
 			}
+			if listings > agentless.MaxDeepListings {
+				t.Fatal("conformance: deep listing limit exceeded")
+			}
 			if len(additional) != 0 {
 				results, err := runner.Run(context.Background(), target, additional)
 				if err != nil {
@@ -200,6 +217,7 @@ func Check(t testing.TB, c Case) {
 					in[result.Read.ID] = result
 				}
 			}
+			checkReadlinks(t, in, links)
 		}
 	}
 	registry := prometheus.NewRegistry()
@@ -217,6 +235,15 @@ func Check(t testing.TB, c Case) {
 	gatherer := prometheus.GathererFunc(func() ([]*dto.MetricFamily, error) { return actual, nil })
 	if err := testutil.GatherAndCompare(gatherer, bytes.NewReader(expected), c.Families...); err != nil {
 		t.Fatalf("conformance: metrics differ: %v", err)
+	}
+}
+
+func checkReadlinks(t testing.TB, in agentless.Input, links []agentless.Read) {
+	t.Helper()
+	for _, read := range links {
+		if _, err := in.Output(read); err != nil {
+			t.Fatalf("conformance: invalid readlink result: %v", err)
+		}
 	}
 }
 

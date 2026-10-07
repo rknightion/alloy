@@ -80,6 +80,9 @@ func (r Read) Validate() error {
 			return fmt.Errorf("read %q has an unsafe path %q", r.ID, r.Path)
 		}
 	case len(r.Argv) != 0:
+		if isReadlinkCommand(r) && !isReadlink(r) {
+			return fmt.Errorf("read %q must be readlink -f of a safe absolute path", r.ID)
+		}
 		if !commandPattern.MatchString(r.Argv[0]) {
 			return fmt.Errorf("read %q has an unsafe command %q", r.ID, r.Argv[0])
 		}
@@ -92,6 +95,31 @@ func (r Read) Validate() error {
 		return fmt.Errorf("read %q sets neither a path nor a command", r.ID)
 	}
 	return nil
+}
+
+// isReadlinkCommand also identifies noncanonical executable paths so they
+// cannot bypass the fixed command form or phase restrictions.
+func isReadlinkCommand(r Read) bool {
+	return len(r.Argv) != 0 && (r.Argv[0] == "readlink" || strings.HasSuffix(r.Argv[0], "/readlink"))
+}
+
+func isReadlink(r Read) bool {
+	return r.Path == "" && len(r.Argv) == 3 && r.Argv[0] == "readlink" && r.Argv[1] == "-f" && safeReadlinkPath(r.Argv[2])
+}
+
+// Match the file/listing path alphabet without regexp allocations on output
+// validation paths. A resolved path is not admitted as a new command here.
+func safeReadlinkPath(path string) bool {
+	if len(path) < 2 || path[0] != '/' || strings.Contains(path, "..") {
+		return false
+	}
+	for i := 1; i < len(path); i++ {
+		c := path[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '/' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // Result is the outcome of one Read.
@@ -157,6 +185,18 @@ func (in Input) Output(r Read) ([]byte, error) {
 	case res.Truncated:
 		return nil, fmt.Errorf("read %q output exceeded the byte cap", r.ID)
 	}
+	if isReadlinkCommand(r) {
+		// A readlink result is one path of at most 4096 bytes, optionally
+		// terminated by exactly one LF. Never expose a partial or multiline
+		// result, even if a runner did not set Truncated.
+		line := res.Output
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			line = line[:len(line)-1]
+		}
+		if len(line) > 4096 || !safeReadlinkPath(string(line)) {
+			return nil, fmt.Errorf("read %q did not return one bounded absolute path", r.ID)
+		}
+	}
 	return res.Output, nil
 }
 
@@ -193,11 +233,12 @@ type Expander interface {
 }
 
 // DeepExpander optionally discovers files through a second level of listings.
-// Expand may return file reads and CommandRead("ls", "-1", directory) reads
-// derived from the fixed phase-one listings. All reads must pass Validate, and
-// at most MaxDeepListings listings may be returned per collector.
+// Expand may return file reads, CommandRead("ls", "-1", directory), and
+// CommandRead("readlink", "-f", path) reads derived from phase-one listings.
+// All reads must pass Validate. The two expansions share MaxDeepListings for
+// phase-two listings and readlink reads in either expansion.
 // ExpandDeep is called once after phase two, with the combined phase-one and
-// phase-two results. It returns only validated file reads, never more listings;
+// phase-two results. It returns validated file or readlink reads, never listings;
 // there is no recursion or fourth phase. Update receives all three phases.
 // The two expansions share MaxExpandedReads and MaxExpandedReadsPerScrape.
 // Like Expand and Update, ExpandDeep must be safe for concurrent targets. A
