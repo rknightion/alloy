@@ -76,11 +76,11 @@ func TestBtrfsRegistration(t *testing.T) {
 	built, err := Build([]string{"btrfs"}, DefaultConfigs(), nil)
 	require.NoError(t, err)
 	require.Len(t, built, 1)
-	require.NotContains(t, DefaultEnabled(), "btrfs")
+	require.Contains(t, DefaultEnabled(), "btrfs")
 	for _, r := range Registered() {
 		if r.Name == "btrfs" {
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	c, in := btrfsFixture(t)

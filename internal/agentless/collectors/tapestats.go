@@ -14,7 +14,7 @@ import (
 const tapestatsName = "tapestats"
 
 func init() {
-	Register(Registration{Name: tapestatsName, OS: "linux", DefaultEnabled: false, Factory: newTapestatsCollector})
+	Register(Registration{Name: tapestatsName, OS: "linux", DefaultEnabled: true, Factory: newTapestatsCollector})
 }
 
 // All ten families exported by the pinned node_exporter are included.

@@ -71,8 +71,8 @@ Updates to inline content also replace trust through component configuration upd
 A failed file reload retains the previous snapshot and increments `agentless_ssh_known_hosts_reload_failures_total`.
 Malformed-content diagnostics don't include the supplied host key content.
 
-An empty `enabled_collectors` list enables the 34 default collectors: `arp`, `bonding`, `conntrack`, `cpu`, `cpufreq`, `diskstats`, `dmi`, `edac`, `entropy`, `filefd`, `filesystem`, `ipvs`, `loadavg`, `mdadm`, `meminfo`, `netclass`, `netdev`, `netstat`, `nfs`, `nfsd`, `nvme`, `os`, `powersupplyclass`, `pressure`, `schedstat`, `selinux`, `sockstat`, `softnet`, `stat`, `thermal_zone`, `udp_queues`, `uname`, `vmstat`, and `zfs`.
-The `hwmon` collector isn't implemented or enabled.
+An empty `enabled_collectors` list enables the 37 default collectors: `arp`, `bonding`, `btrfs`, `conntrack`, `cpu`, `cpufreq`, `diskstats`, `dmi`, `edac`, `entropy`, `fibrechannel`, `filefd`, `filesystem`, `ipvs`, `loadavg`, `mdadm`, `meminfo`, `netclass`, `netdev`, `netstat`, `nfs`, `nfsd`, `nvme`, `os`, `powersupplyclass`, `pressure`, `schedstat`, `selinux`, `sockstat`, `softnet`, `stat`, `tapestats`, `thermal_zone`, `udp_queues`, `uname`, `vmstat`, and `zfs`.
+The `xfs`, `bcache`, `infiniband`, and `hwmon` collectors aren't implemented or enabled.
 Unknown or duplicate collector names cause a configuration error.
 Timeouts must be positive, `max_concurrent_dials` must be at least `1`, and `max_sessions_per_target` must be between `1` and `9`.
 Addresses must be unique, including equivalent host and port forms.
@@ -90,11 +90,14 @@ Without the header, the batch uses `timeout`.
 All supported collectors target Linux and are enabled by default.
 The runner combines their fixed reads into one SSH execution per scrape and shares duplicate reads.
 Collectors with listing reads can request a second execution for fixed attribute files derived from validated names.
-The `edac` collector can request second-level directory listings in that execution, followed by a third execution for fixed row attributes.
+The `edac` and `btrfs` collectors can request second-level directory listings in that execution, followed by a third execution for fixed attributes.
 A scrape uses at most three executions (phases), not one execution per collector or device.
 Expanded reads share a `1024`-read budget per collector across the second and third phases, including second-level listings.
 The deduplicated additional reads share a `4096`-read budget per scrape across both expansion phases; initial fixed reads don't consume this budget.
-Each deep-expanding collector can request at most `64` second-level listings.
+Each deep-expanding collector can request at most `64` second-level listings or readlink reads.
+The listing seam also permits exactly `readlink -f <absolute path>` in the second and third phases, with one bounded output line.
+These reads consume the same per-collector and per-scrape expansion budgets and the `64`-read second-level listing budget.
+No enabled collector currently requests a readlink read; other readlink forms and custom commands aren't supported.
 Exceeding either cap rejects the affected expansion without reading or emitting a truncated subset.
 You can't supply custom commands.
 
@@ -102,6 +105,7 @@ You can't supply custom commands.
 | ---- | ----------- | ------- |
 | `arp` | `/proc/net/arp`. | ARP entry counts by device (`node_arp_entries`). |
 | `bonding` | `/sys/class/net/bonding_masters` and `ls -1 /sys/class/net`, shared with `netclass`; then `bonding/slaves` per primary interface and `bonding_slave/mii_status` per validated interface. | Configured and active member counts (`node_bonding_slaves` and `node_bonding_active`). |
+| `btrfs` | `ls -1 /sys/fs/btrfs`; then `ls -1` of each validated filesystem's `devices`, `allocation/data`, `allocation/metadata`, and `allocation/system` directories, plus `label`, `metadata_uuid`, `allocation/global_rsv_size`, and each allocation group's `bytes_reserved`; then `devices/<device>/size` and each validated allocation mode's `used_bytes` and `total_bytes`. | Sysfs filesystem identity, reserve, allocation, and device-size gauges (`node_btrfs_*`). Device error counters (`node_btrfs_device_errors_total`), unused device bytes (`node_btrfs_device_unused_bytes`), and the `btrfs_dev_uuid` label require ioctls and aren't collected. |
 | `conntrack` | `/proc/sys/net/netfilter/nf_conntrack_count`, `/proc/sys/net/netfilter/nf_conntrack_max`, and `/proc/net/stat/nf_conntrack`. | Connection tracking entry, limit, and statistics gauges (`node_nf_conntrack_*`). |
 | `cpu` | `/proc/stat`. | CPU time counters (`node_cpu_seconds_total`). |
 | `cpufreq` | `ls -1 /sys/devices/system/cpu`, then eight fixed files under each validated `cpu<N>/cpufreq/` path. | CPU frequency gauges in hertz (`node_cpu_*frequency*_hertz`) and governor state (`node_cpu_scaling_governor`). |
@@ -109,6 +113,7 @@ You can't supply custom commands.
 | `dmi` | Twenty fixed files under `/sys/class/dmi/id`: `bios_date`, `bios_release`, `bios_vendor`, `bios_version`, `board_asset_tag`, `board_name`, `board_serial`, `board_vendor`, `board_version`, `chassis_asset_tag`, `chassis_serial`, `chassis_vendor`, `chassis_version`, `product_family`, `product_name`, `product_serial`, `product_sku`, `product_uuid`, `product_version`, and `sys_vendor`. | DMI identity labels (`node_dmi_info`), with `sys_vendor` exported as `system_vendor`. Unavailable or unreadable attributes are omitted. |
 | `edac` | `ls -1 /sys/devices/system/edac/mc`; then `ls -1` of each validated `mc<N>` directory and four controller files; then two fixed files per validated `csrow<N>`. | Correctable and uncorrectable memory error counters (`node_edac_*errors_total`). |
 | `entropy` | `/proc/sys/kernel/random/entropy_avail` and `/proc/sys/kernel/random/poolsize`. | Entropy gauges (`node_entropy_available_bits` and `node_entropy_pool_size_bits`). |
+| `fibrechannel` | `ls -1 /sys/class/fc_host`, then eleven identity attributes and fourteen statistics files per validated host. | Host identity (`node_fibrechannel_info`) and traffic and error counters (`node_fibrechannel_*_total`). `node_name` is read but isn't exported. |
 | `filefd` | `/proc/sys/fs/file-nr`. | File descriptor gauges (`node_filefd_allocated` and `node_filefd_maximum`). |
 | `filesystem` | `env LC_ALL=C df -akPT`, `env LC_ALL=C df -aiPT`, and `/proc/self/mounts`. | Space, inode, read-only, and device-error gauges (`node_filesystem_*`). |
 | `ipvs` | `/proc/net/ip_vs_stats` and `/proc/net/ip_vs`. | IP virtual server traffic counters and backend connection and weight gauges (`node_ipvs_*`). |
@@ -129,6 +134,7 @@ You can't supply custom commands.
 | `sockstat` | `/proc/net/sockstat`, `/proc/net/sockstat6`, and `getconf PAGESIZE`. | Socket usage and memory gauges (`node_sockstat_*`), using the target's page size for byte values. |
 | `softnet` | `/proc/net/softnet_stat`. | Per-CPU packet processing counters and backlog gauges (`node_softnet_*`). |
 | `stat` | `/proc/stat`. | Boot time, context switches, interrupts, forks, and running or blocked processes. |
+| `tapestats` | `ls -1 /sys/class/scsi_tape`, then ten fixed `stats/` files per validated `st<N>` device. | Tape I/O gauges and counters (`node_tape_*`), with nanoseconds converted to seconds. Non-rewinding and mode aliases aren't collected. |
 | `thermal_zone` | `ls -1 /sys/class/thermal`, then `type`, `temp`, `policy`, and `mode` per validated `thermal_zone<N>`, and `type`, `cur_state`, and `max_state` per validated `cooling_device<N>`. | Zone temperature in Celsius (`node_thermal_zone_temp`) and cooling-device state (`node_cooling_device_*_state`). |
 | `udp_queues` | `/proc/net/udp` and `/proc/net/udp6`. | Aggregated transmit and receive queue memory gauges by IP version (`node_udp_queues`). |
 | `uname` | `uname -s`, `uname -n`, `uname -r`, `uname -v`, `uname -m`, and `/proc/sys/kernel/domainname`. | Kernel and host identity (`node_uname_info`). |
@@ -154,6 +160,19 @@ Controller listings and attributes consume five additional reads per controller,
 For example, one controller and `509` rows consume `1023` additional reads; `510` rows exceed the budget.
 Too many controllers, rows, or listing entries fail the whole collector without publishing a truncated snapshot.
 A missing hardware directory can yield collector success `1` with no hardware samples; a timeout or truncated result isn't treated as absence.
+
+The `fibrechannel` collector reads `speed`, `port_state`, `port_type`, `port_id`, `port_name`, `fabric_name`, `symbolic_name`, `supported_classes`, `supported_speeds`, `dev_loss_tmo`, and `node_name` per host.
+It also reads `statistics/dumped_frames`, `statistics/error_frames`, `statistics/invalid_crc_count`, `statistics/rx_frames`, `statistics/rx_words`, `statistics/tx_frames`, `statistics/tx_words`, `statistics/seconds_since_last_reset`, `statistics/invalid_tx_word_count`, `statistics/link_failure_count`, `statistics/loss_of_sync_count`, `statistics/loss_of_signal_count`, `statistics/nos_count`, and `statistics/fcp_packet_aborts`.
+At most `40` hosts fit (`1000` additional reads); `41` don't (`1025`).
+
+The `tapestats` collector reads `in_flight`, `io_ns`, `other_cnt`, `read_byte_cnt`, `read_cnt`, `read_ns`, `resid_cnt`, `write_byte_cnt`, `write_cnt`, and `write_ns` under each device's `stats/` directory.
+At most `102` devices fit (`1020` additional reads); `103` don't (`1030`).
+
+The `btrfs` collector uses four second-level listings and six attribute reads per filesystem.
+At most `16` filesystems fit the `64` second-level listing budget.
+Device-size files and allocation-mode files also consume the shared `1024` additional-read budget.
+It accepts the allocation modes `single`, `dup`, `raid0`, `raid1`, `raid10`, `raid1c3`, `raid1c4`, `raid5`, and `raid6`.
+Device error counters for write, read, flush, corruption, and generation errors aren't available through these sysfs reads.
 
 The metric names are compatible with node_exporter for the supported families, not its entire collector set.
 The `cpu` collector doesn't collect CPU information or `/sys`-derived families; `cpufreq` collects the supported sysfs frequency families.

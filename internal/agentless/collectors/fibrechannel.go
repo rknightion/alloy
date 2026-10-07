@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "fibrechannel", OS: "linux", DefaultEnabled: false, Factory: newFibrechannelCollector})
+	Register(Registration{Name: "fibrechannel", OS: "linux", DefaultEnabled: true, Factory: newFibrechannelCollector})
 }
 
 // Fixed attributes from the pinned node_exporter fibrechannel collector and

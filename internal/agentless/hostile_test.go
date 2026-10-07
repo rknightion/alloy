@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -379,6 +380,158 @@ func TestHostileHardwareSharedExpansionBudget(t *testing.T) {
 	}
 }
 
+// These cases are also the dispatch table used by the default heap suite.
+var hostileStorageCases = map[string]string{
+	"fibrechannel": "host0\n",
+	"tapestats":    "st0\n",
+	"btrfs":        "11111111-1111-1111-1111-111111111111\n",
+}
+
+func TestHostileDefaultCoverage(t *testing.T) {
+	covered := []string{
+		"arp", "bonding", "conntrack", "cpu", "cpufreq", "diskstats", "dmi", "edac", "entropy", "filefd", "filesystem", "ipvs", "loadavg", "mdadm", "meminfo", "netclass", "netdev", "netstat", "nfs", "nfsd", "nvme", "os", "powersupplyclass", "pressure", "schedstat", "selinux", "sockstat", "softnet", "stat", "thermal_zone", "udp_queues", "uname", "vmstat", "zfs",
+	}
+	for name := range hostileStorageCases {
+		covered = append(covered, name)
+	}
+	slices.Sort(covered)
+	require.Equal(t, collectors.DefaultEnabled(), covered, "every default needs an executable hostile case")
+}
+
+// Drive the real Scraper through all listing phases, then poison each read
+// separately so a failed early attribute cannot mask an untested later one.
+func hostileStorageExpanded(t *testing.T, collector agentless.Collector) {
+	t.Helper()
+	results := map[string]agentless.Result{}
+	put := func(read agentless.Read, value string) {
+		results[read.ID] = agentless.Result{Read: read, Output: []byte(value)}
+	}
+	listing := collector.Reads()[0]
+	put(listing, hostileStorageCases[collector.Name()])
+	second, err := collector.(agentless.Expander).Expand(agentless.Target{}, agentless.Input(results))
+	require.NoError(t, err)
+	for _, read := range second {
+		value := "1\n"
+		if len(read.Argv) != 0 {
+			value = "single\n"
+			if strings.HasSuffix(read.Argv[2], "/devices") {
+				value = "sda\n"
+			}
+		} else if strings.HasSuffix(read.Path, "/metadata_uuid") {
+			value = hostileStorageCases["btrfs"]
+		}
+		put(read, value)
+	}
+	var third []agentless.Read
+	if deep, ok := collector.(agentless.DeepExpander); ok {
+		third, err = deep.ExpandDeep(agentless.Target{}, agentless.Input(results))
+		require.NoError(t, err)
+		for _, read := range third {
+			put(read, "1\n")
+		}
+	}
+	reads := append(append(append([]agentless.Read{}, collector.Reads()...), second...), third...)
+	for index := -1; index < len(reads); index++ {
+		name := "baseline"
+		if index >= 0 {
+			name = fmt.Sprintf("read_%d", index)
+		}
+		t.Run(name, func(t *testing.T) {
+			input := make(map[string]agentless.Result, len(results))
+			for id, result := range results {
+				input[id] = result
+			}
+			if index >= 0 {
+				read := reads[index]
+				output := []byte(strings.Repeat("x\n", ((1<<20)-2)/2))
+				require.Greater(t, len(output), 1000000)
+				require.Less(t, len(output), 1<<20)
+				input[read.ID] = agentless.Result{Read: read, Output: output}
+			}
+			runner := &hostileExpandedRunner{FakeRunner: agentlesstest.FakeRunner{Results: input}}
+			s, err := agentless.NewScraper(runner, []agentless.Collector{collector}, util.TestLogger(t))
+			require.NoError(t, err)
+			runtime.GC()
+			var peak atomic.Uint64
+			stop := make(chan struct{})
+			done := make(chan struct{})
+			sample := func() {
+				var stats runtime.MemStats
+				runtime.ReadMemStats(&stats)
+				if stats.HeapInuse > peak.Load() {
+					peak.Store(stats.HeapInuse)
+				}
+			}
+			sample()
+			go func() {
+				defer close(done)
+				ticker := time.NewTicker(time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						sample()
+					case <-stop:
+						return
+					}
+				}
+			}()
+			stopSampler := sync.OnceFunc(func() { close(stop); <-done })
+			t.Cleanup(stopSampler)
+			result, err := s.Scrape(t.Context(), agentless.Target{Address: "host:22"})
+			require.NoError(t, err)
+			reg := prometheus.NewRegistry()
+			require.NoError(t, reg.Register(result))
+			families, err := reg.Gather()
+			require.NoError(t, err)
+			stopSampler()
+			sample()
+			require.Less(t, peak.Load(), uint64(64<<20), "hostile storage processing must stay below 64 MiB of sampled heap")
+			t.Logf("collector=%s case=%s sampled_peak=%d", collector.Name(), name, peak.Load())
+			series, statuses := 0, 0
+			for _, family := range families {
+				switch family.GetName() {
+				case "node_scrape_collector_success":
+					statuses++
+					require.Len(t, family.Metric, 1)
+					want := 0.0
+					if index < 0 {
+						want = 1
+					}
+					require.Equal(t, want, family.Metric[0].GetGauge().GetValue())
+				case "node_scrape_collector_duration_seconds":
+				default:
+					series += len(family.Metric)
+				}
+			}
+			require.Equal(t, 1, statuses)
+			if index < 0 {
+				wantSeries, wantCalls := 15, 2
+				switch collector.Name() {
+				case "tapestats":
+					wantSeries = 10
+				case "btrfs":
+					wantSeries, wantCalls = 15, 3
+				}
+				require.Equal(t, wantSeries, series)
+				require.Len(t, runner.batches, wantCalls)
+				require.Equal(t, second, runner.batches[1])
+				if wantCalls == 3 {
+					require.Equal(t, third, runner.batches[2])
+				}
+			} else {
+				require.Zero(t, series, "hostile reads must fail atomically")
+			}
+			for _, batch := range runner.batches {
+				for _, read := range batch {
+					require.NoError(t, read.Validate())
+					require.Contains(t, input, read.ID)
+				}
+			}
+		})
+	}
+}
+
 // Match the security review's seven nearly-1-MiB sections, not a reduced
 // cardinality proxy. Filesystem parsing makes this a slow, opt-in test.
 func hostileResults() map[string]agentless.Result {
@@ -567,6 +720,10 @@ func TestHostileDefaultCollectorsHeap(t *testing.T) {
 		return []byte(b.String())
 	}
 	for _, collector := range cs {
+		if _, ok := hostileStorageCases[collector.Name()]; ok {
+			t.Run(collector.Name(), func(t *testing.T) { hostileStorageExpanded(t, collector) })
+			continue
+		}
 		// Expanded attributes need their own two-phase proof; the existing
 		// fixed-read corpus below intentionally still requires one runner call.
 		switch collector.Name() {

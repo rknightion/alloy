@@ -66,13 +66,13 @@ func TestFibrechannelRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "fibrechannel", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "fibrechannel")
+	require.Contains(t, DefaultEnabled(), "fibrechannel")
 	found := false
 	for _, registration := range Registered() {
 		if registration.Name == "fibrechannel" {
 			found = true
 			require.Equal(t, "linux", registration.OS)
-			require.False(t, registration.DefaultEnabled)
+			require.True(t, registration.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

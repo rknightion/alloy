@@ -15,7 +15,7 @@ import (
 // corruption, generation), node_btrfs_device_unused_bytes and the
 // btrfs_dev_uuid label require ioctls and are deliberately omitted.
 func init() {
-	Register(Registration{Name: "btrfs", OS: "linux", DefaultEnabled: false, Factory: newBtrfsCollector})
+	Register(Registration{Name: "btrfs", OS: "linux", DefaultEnabled: true, Factory: newBtrfsCollector})
 }
 
 const btrfsRoot = "/sys/fs/btrfs"
