@@ -90,22 +90,23 @@ func TestCpufreqRegistration(t *testing.T) {
 func TestCpufreqListing(t *testing.T) {
 	c, in := cpufreqFixture(t)
 	listing := c.Reads()[0]
-	for _, count := range []int{32, 33, 257} {
+	maxCPUs := agentless.MaxExpandedReads / 8
+	for _, count := range []int{maxCPUs, maxCPUs + 1, agentless.MaxExpandedReads + 1} {
 		var b strings.Builder
 		for i := 0; i < count; i++ {
 			fmt.Fprintf(&b, "cpu%d\n", i)
 		}
 		in[listing.ID] = agentless.Result{Read: listing, Output: []byte(b.String())}
 		reads, err := c.Expand(agentless.Target{}, in)
-		if count == 32 {
+		if count == maxCPUs {
 			require.NoError(t, err)
-			require.Len(t, reads, 256)
+			require.Len(t, reads, maxCPUs*8)
 		} else {
 			require.Error(t, err)
 			require.Nil(t, reads)
 		}
 	}
-	for _, s := range []string{"cpu0", "\n", "cpu0\ncpu0\n", strings.Repeat("invalid\n", 257), strings.Repeat("x", 1<<20) + "\n"} {
+	for _, s := range []string{"cpu0", "\n", "cpu0\ncpu0\n", strings.Repeat("invalid\n", agentless.MaxExpandedReads+1), strings.Repeat("x", 1<<20) + "\n"} {
 		in[listing.ID] = agentless.Result{Read: listing, Output: []byte(s)}
 		reads, err := c.Expand(agentless.Target{}, in)
 		require.Error(t, err)

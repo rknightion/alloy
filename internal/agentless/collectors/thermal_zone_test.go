@@ -86,7 +86,7 @@ func TestThermalZoneListingBounds(t *testing.T) {
 	}{
 		{"thermal_zone0\ncooling_device0\n../evil\nthermal_zone1/x\nthermal_zone-1\nthermal_zone1;id\nthermal_zone\n", 7, false},
 		{"thermal_zone0", 0, true}, {"\n", 0, true}, {"thermal_zone0\nthermal_zone0\n", 0, true},
-		{strings.Repeat("invalid\n", 257), 0, true}, {strings.Repeat("x", 1<<20) + "\n", 0, true},
+		{strings.Repeat("invalid\n", agentless.MaxExpandedReads+1), 0, true}, {strings.Repeat("x", 1<<20) + "\n", 0, true},
 	} {
 		in[listing.ID] = agentless.Result{Read: listing, Output: []byte(test.output)}
 		reads, err := c.Expand(agentless.Target{}, in)
@@ -98,16 +98,17 @@ func TestThermalZoneListingBounds(t *testing.T) {
 			require.Len(t, reads, test.count)
 		}
 	}
-	for _, count := range []int{64, 65} {
+	maxZones := agentless.MaxExpandedReads / 4
+	for _, count := range []int{maxZones, maxZones + 1} {
 		var output strings.Builder
 		for i := 0; i < count; i++ {
 			fmt.Fprintf(&output, "thermal_zone%d\n", i)
 		}
 		in[listing.ID] = agentless.Result{Read: listing, Output: []byte(output.String())}
 		reads, err := c.Expand(agentless.Target{}, in)
-		if count == 64 {
+		if count == maxZones {
 			require.NoError(t, err)
-			require.Len(t, reads, 256)
+			require.Len(t, reads, maxZones*4)
 		} else {
 			require.ErrorContains(t, err, "expanded read limit")
 			require.Nil(t, reads)
