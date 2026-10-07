@@ -37,6 +37,31 @@ func TestFromFSListingAndExpandedReads(t *testing.T) {
 	require.True(t, results[5].NotExist, "no recursive listing simulation")
 }
 
+func TestFromFSSecondLevelListingAndFile(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sys/devices/a"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "sys/devices/a/value"), []byte("42\n"), 0o600))
+	listing := agentless.CommandRead("ls", "-1", "/sys/devices")
+	runner, err := agentlesstest.FromFS(root, nil, []agentless.Read{listing})
+	require.NoError(t, err)
+	for _, phase := range []struct {
+		read   agentless.Read
+		output string
+	}{
+		{listing, "a\n"},
+		{agentless.CommandRead("ls", "-1", "/sys/devices/a"), "value\n"},
+		{agentless.FileRead("/sys/devices/a/value"), "42\n"},
+	} {
+		results, err := runner.Run(t.Context(), agentless.Target{}, []agentless.Read{phase.read})
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		require.Equal(t, phase.read, results[0].Read)
+		require.Zero(t, results[0].ExitStatus)
+		require.Equal(t, phase.output, string(results[0].Output))
+	}
+	require.Equal(t, 3, runner.Calls())
+}
+
 func TestFromFSExplicitListingOutput(t *testing.T) {
 	root := t.TempDir()
 	output := filepath.Join(root, "output")

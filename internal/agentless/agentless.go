@@ -191,3 +191,18 @@ type Expander interface {
 	Collector
 	Expand(target Target, in Input) ([]Read, error)
 }
+
+// DeepExpander optionally discovers files through a second level of listings.
+// Expand may return file reads and CommandRead("ls", "-1", directory) reads
+// derived from the fixed phase-one listings. All reads must pass Validate, and
+// at most MaxDeepListings listings may be returned per collector.
+// ExpandDeep is called once after phase two, with the combined phase-one and
+// phase-two results. It returns only validated file reads, never more listings;
+// there is no recursion or fourth phase. Update receives all three phases.
+// The two expansions share MaxExpandedReads and MaxExpandedReadsPerScrape.
+// Like Expand and Update, ExpandDeep must be safe for concurrent targets. A
+// failure in either expansion skips only this collector's Update.
+type DeepExpander interface {
+	Expander
+	ExpandDeep(target Target, in Input) ([]Read, error)
+}

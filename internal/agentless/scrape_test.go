@@ -585,6 +585,358 @@ func TestScrapeExpansionEmptyOrFixedNeedsNoSecondBatch(t *testing.T) {
 	}
 }
 
+type deepCollector struct {
+	expandingCollector
+	deep func(agentless.Target, agentless.Input) ([]agentless.Read, error)
+}
+
+func (c deepCollector) ExpandDeep(target agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+	return c.deep(target, in)
+}
+
+func TestScrapeDeepThreePhasesFromFixture(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a", "b"} {
+		dir := filepath.Join(root, "sys/devices", name)
+		require.NoError(t, os.MkdirAll(dir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "value"), []byte("42\n"), 0o600))
+	}
+	listing := agentless.CommandRead("ls", "-1", "/sys/devices")
+	target := agentless.Target{Address: "fixture", Auth: "fixture-auth"}
+	expansions, deepExpansions, updates := 0, 0, 0
+	makeCollector := func(name string) deepCollector {
+		return deepCollector{expandingCollector: expandingCollector{name: name, reads: []agentless.Read{listing},
+			expand: func(got agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+				expansions++
+				require.Equal(t, target, got)
+				require.Len(t, in, 1)
+				output, err := in.Output(listing)
+				require.NoError(t, err)
+				var reads []agentless.Read
+				for _, entry := range strings.Fields(string(output)) {
+					reads = append(reads, agentless.CommandRead("ls", "-1", "/sys/devices/"+entry))
+				}
+				return reads, nil
+			},
+			update: func(got agentless.Target, in agentless.Input, ch chan<- prometheus.Metric) error {
+				updates++
+				assert.Equal(t, target, got)
+				assert.Len(t, in, 5)
+				for _, entry := range []string{"a", "b"} {
+					output, err := in.Output(agentless.FileRead("/sys/devices/" + entry + "/value"))
+					assert.NoError(t, err)
+					assert.Equal(t, "42\n", string(output))
+				}
+				ch <- prometheus.MustNewConstMetric(lineDesc, prometheus.GaugeValue, 2, name)
+				return nil
+			}},
+			deep: func(got agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+				deepExpansions++
+				require.Equal(t, target, got)
+				require.Len(t, in, 3, "ExpandDeep sees phases one and two, never phase three")
+				output, err := in.Output(listing)
+				require.NoError(t, err)
+				var reads []agentless.Read
+				for _, entry := range strings.Fields(string(output)) {
+					second := agentless.CommandRead("ls", "-1", "/sys/devices/"+entry)
+					files, err := in.Output(second)
+					require.NoError(t, err)
+					for _, file := range strings.Fields(string(files)) {
+						reads = append(reads, agentless.FileRead("/sys/devices/"+entry+"/"+file))
+					}
+				}
+				return append(reads, reads[0]), nil
+			},
+		}
+	}
+	fixture, err := agentlesstest.FromFS(root, nil, []agentless.Read{listing})
+	require.NoError(t, err)
+	runner := &recordingRunner{runner: fixture}
+	s, err := agentless.NewScraper(runner, []agentless.Collector{makeCollector("a"), makeCollector("b")}, util.TestLogger(t))
+	require.NoError(t, err)
+	result, err := s.Scrape(t.Context(), target)
+	require.NoError(t, err)
+	require.Equal(t, [][]agentless.Read{{listing},
+		{agentless.CommandRead("ls", "-1", "/sys/devices/a"), agentless.CommandRead("ls", "-1", "/sys/devices/b")},
+		{agentless.FileRead("/sys/devices/a/value"), agentless.FileRead("/sys/devices/b/value")}}, runner.batches)
+	require.Equal(t, 2, expansions)
+	require.Equal(t, 2, deepExpansions, "called once per collector, no fourth phase")
+	assertCollectorSuccess(t, result, map[string]float64{"a": 1, "b": 1})
+	require.Equal(t, 2, updates)
+}
+
+func TestScrapeDeepListingCap(t *testing.T) {
+	for _, n := range []int{64, 65} {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			listing := agentless.CommandRead("ls", "-1", "/sys/devices")
+			var names strings.Builder
+			for i := 0; i < n; i++ {
+				fmt.Fprintf(&names, "%d\n", i)
+			}
+			runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{
+				listing.ID: {Output: []byte(names.String())}, procStat.ID: {Output: []byte("cpu 1\n")},
+			}}}
+			deepCalls, updates := 0, 0
+			c := deepCollector{expandingCollector: expandingCollector{name: "deep", reads: []agentless.Read{listing},
+				expand: func(_ agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+					output, err := in.Output(listing)
+					require.NoError(t, err)
+					var reads []agentless.Read
+					for _, name := range strings.Fields(string(output)) {
+						reads = append(reads, agentless.CommandRead("ls", "-1", "/sys/devices/"+name))
+					}
+					return reads, nil
+				}, update: func(_ agentless.Target, _ agentless.Input, ch chan<- prometheus.Metric) error {
+					updates++
+					ch <- prometheus.MustNewConstMetric(lineDesc, prometheus.GaugeValue, 1, "deep")
+					return nil
+				}}, deep: func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+				deepCalls++
+				return nil, nil
+			}}
+			s, err := agentless.NewScraper(runner, []agentless.Collector{c, lineCounter{"fixed"}}, util.TestLogger(t))
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{})
+			require.NoError(t, err)
+			want := float64(1)
+			if n == 65 {
+				want = 0
+			}
+			assertCollectorSuccess(t, result, map[string]float64{"deep": want, "fixed": 1})
+			require.Equal(t, int(want), deepCalls)
+			require.Equal(t, int(want), updates)
+			require.Equal(t, 1+int(want), len(runner.batches), "no third batch for empty deep reads; no partial phase two on rejection")
+			require.Equal(t, 1+int(want), testutil.CollectAndCount(result, "node_test_lines"))
+			if n == 64 {
+				require.Len(t, runner.batches[1], 64)
+			}
+		})
+	}
+}
+
+func capDeepCollector(name string, second, third []agentless.Read, updates *int) deepCollector {
+	return deepCollector{expandingCollector: expandingCollector{name: name,
+		expand: func(agentless.Target, agentless.Input) ([]agentless.Read, error) { return second, nil },
+		update: func(_ agentless.Target, _ agentless.Input, ch chan<- prometheus.Metric) error {
+			*updates++
+			ch <- prometheus.MustNewConstMetric(lineDesc, prometheus.GaugeValue, 1, name)
+			return nil
+		}}, deep: func(agentless.Target, agentless.Input) ([]agentless.Read, error) { return third, nil }}
+}
+
+func TestScrapeDeepCombinedCollectorCap(t *testing.T) {
+	for _, n := range []int{512, 513} {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			runner := &recordingRunner{runner: &agentlesstest.FakeRunner{}}
+			updates, goodUpdates := 0, 0
+			c := capDeepCollector("deep", generatedReads("second", 512), generatedReads("third", n), &updates)
+			good := capDeepCollector("good", nil, generatedReads("good", 1), &goodUpdates)
+			s, err := agentless.NewScraper(runner, []agentless.Collector{c, good}, util.TestLogger(t))
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{})
+			require.NoError(t, err)
+			want := float64(1)
+			if n == 513 {
+				want = 0
+			}
+			assertCollectorSuccess(t, result, map[string]float64{"deep": want, "good": 1})
+			require.Equal(t, int(want), updates, "combined overflow skips whole collector Update")
+			require.Equal(t, 1, goodUpdates)
+			require.Len(t, runner.batches, 3)
+			require.Len(t, runner.batches[1], 512)
+			require.Len(t, runner.batches[2], int(want)*n+1, "no rejected phase-three reads")
+			require.Equal(t, int(want)+1, testutil.CollectAndCount(result, "node_test_lines"))
+		})
+	}
+}
+
+func TestScrapeDeepCombinedScrapeCap(t *testing.T) {
+	for _, overflow := range []bool{false, true} {
+		t.Run(fmt.Sprint(overflow), func(t *testing.T) {
+			runner := &recordingRunner{runner: &agentlesstest.FakeRunner{}}
+			var collectors []agentless.Collector
+			want := map[string]float64{}
+			updates := make([]int, 6)
+			for i := 0; i < 4; i++ {
+				name := fmt.Sprintf("deep%d", i)
+				collectors = append(collectors, capDeepCollector(name, generatedReads(name+"second", 512), generatedReads(name+"third", 512), &updates[i]))
+				want[name] = 1
+			}
+			// A collector can share already admitted reads even at the cap.
+			extra := []agentless.Read{generatedReads("deep0third", 1)[0]}
+			want["extra"] = 1
+			if overflow {
+				extra = append(extra, generatedReads("overflow", 1)...)
+				want["extra"] = 0
+			}
+			collectors = append(collectors, capDeepCollector("extra", nil, extra, &updates[4]),
+				capDeepCollector("shared", nil, generatedReads("deep0third", 512), &updates[5]))
+			want["shared"] = 1
+			s, err := agentless.NewScraper(runner, collectors, util.TestLogger(t))
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{})
+			require.NoError(t, err)
+			assertCollectorSuccess(t, result, want)
+			require.Len(t, runner.batches, 3)
+			require.Len(t, runner.batches[1], 2048)
+			require.Len(t, runner.batches[2], 2048, "combined phase-two and phase-three scrape cap is 4096")
+			require.Equal(t, int(want["extra"]), updates[4])
+			require.Equal(t, 1, updates[5])
+			require.Equal(t, 5+int(want["extra"]), testutil.CollectAndCount(result, "node_test_lines"))
+		})
+	}
+}
+
+func TestScrapeDeepFailuresAreIsolated(t *testing.T) {
+	second := agentless.FileRead("/sys/second")
+	for _, tc := range []struct {
+		name  string
+		reads []agentless.Read
+		deep  func(agentless.Target, agentless.Input) ([]agentless.Read, error)
+	}{
+		{"invalid listing command", []agentless.Read{agentless.CommandRead("ls", "-R", "/sys")}, nil},
+		{"relative listing", []agentless.Read{agentless.CommandRead("ls", "-1", "sys")}, nil},
+		{"unsafe listing", []agentless.Read{agentless.CommandRead("ls", "-1", "/sys/../escape")}, nil},
+		{"error", nil, func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return nil, errors.New("deep failed")
+		}},
+		{"panic", nil, func(agentless.Target, agentless.Input) ([]agentless.Read, error) { panic("deep panic") }},
+		{"invalid file", nil, func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return []agentless.Read{agentless.FileRead("/sys/bad/ok"), agentless.FileRead("/sys/../escape")}, nil
+		}},
+		{"fourth phase listing", nil, func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return []agentless.Read{agentless.CommandRead("ls", "-1", "/sys")}, nil
+		}},
+		{"conflict second", nil, func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return []agentless.Read{agentless.FileRead("/sys/bad/ok"), {ID: second.ID, Path: "/sys/conflict"}}, nil
+		}},
+		{"conflict fixed", nil, func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return []agentless.Read{{ID: procStat.ID, Path: "/sys/conflict"}}, nil
+		}},
+		{"conflict local", nil, func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return []agentless.Read{{ID: "duplicate", Path: "/sys/a"}, {ID: "duplicate", Path: "/sys/b"}}, nil
+		}},
+		{"duplicate combined overflow", nil, func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			reads := make([]agentless.Read, 1024)
+			for i := range reads {
+				reads[i] = second
+			}
+			return reads, nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{procStat.ID: {Output: []byte("cpu 1\n")}}}}
+			if tc.reads == nil {
+				tc.reads = []agentless.Read{second}
+			}
+			if tc.deep == nil {
+				tc.deep = func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+					t.Error("invalid phase two must skip ExpandDeep")
+					return nil, nil
+				}
+			}
+			updates, goodUpdates := 0, 0
+			bad := capDeepCollector("bad", tc.reads, nil, &updates)
+			bad.deep = tc.deep
+			goodRead := agentless.FileRead("/sys/good/value")
+			good := capDeepCollector("good", nil, []agentless.Read{goodRead}, &goodUpdates)
+			s, err := agentless.NewScraper(runner, []agentless.Collector{bad, good, lineCounter{"fixed"}}, util.TestLogger(t))
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{})
+			require.NoError(t, err)
+			assertCollectorSuccess(t, result, map[string]float64{"bad": 0, "good": 1, "fixed": 1})
+			require.Zero(t, updates)
+			require.Equal(t, 1, goodUpdates)
+			require.Equal(t, []agentless.Read{goodRead}, runner.batches[len(runner.batches)-1], "atomic deep rejection")
+			require.Equal(t, 2, testutil.CollectAndCount(result, "node_test_lines"))
+		})
+	}
+}
+
+func TestScrapeDeepBatchFailureKeepsEarlierResults(t *testing.T) {
+	for _, phase := range []int{2, 3} {
+		for _, mode := range []string{"error", "short", "wrong ID", "failed read"} {
+			t.Run(fmt.Sprintf("%d/%s", phase, mode), func(t *testing.T) {
+				second, third := agentless.FileRead("/sys/second"), agentless.FileRead("/sys/third")
+				runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{
+					procStat.ID: {Output: []byte("cpu 1\n")}, second.ID: {}, third.ID: {},
+				}}, fail: func(call int, results []agentless.Result) ([]agentless.Result, error) {
+					if call != phase {
+						return results, nil
+					}
+					switch mode {
+					case "error":
+						return nil, errors.New("deep batch transport failed")
+					case "short":
+						return nil, nil
+					case "wrong ID":
+						results[0].Read = procStat
+					case "failed read":
+						results[0].ExitStatus = 1
+					}
+					return results, nil
+				}}
+				deepCalls := 0
+				c := deepCollector{expandingCollector: expandingCollector{name: "deep",
+					expand: func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+						return []agentless.Read{second}, nil
+					},
+					update: func(_ agentless.Target, in agentless.Input, _ chan<- prometheus.Metric) error {
+						assert.Equal(t, "failed read", mode)
+						_, err := in.Output(third)
+						return err
+					}}, deep: func(_ agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+					deepCalls++
+					if _, err := in.Output(second); err != nil {
+						return nil, err
+					}
+					return []agentless.Read{third}, nil
+				}}
+				prior := expandingCollector{name: "prior", expand: func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+					if phase == 3 {
+						return []agentless.Read{second}, nil
+					}
+					return nil, nil
+				}, update: func(agentless.Target, agentless.Input, chan<- prometheus.Metric) error { return nil }}
+				s, err := agentless.NewScraper(runner, []agentless.Collector{c, prior, lineCounter{"fixed"}}, util.TestLogger(t))
+				require.NoError(t, err)
+				result, err := s.Scrape(t.Context(), agentless.Target{})
+				require.NoError(t, err)
+				assertCollectorSuccess(t, result, map[string]float64{"deep": 0, "prior": 1, "fixed": 1})
+				require.Len(t, runner.batches, phase)
+				wantDeep := 1
+				if phase == 2 && mode != "failed read" {
+					wantDeep = 0
+				}
+				require.Equal(t, wantDeep, deepCalls)
+			})
+		}
+	}
+}
+
+func TestScrapeDeepEmptyNeedsNoThirdBatch(t *testing.T) {
+	for _, second := range [][]agentless.Read{nil, {procStat}, generatedReads("second", 1)} {
+		for _, third := range [][]agentless.Read{nil, {procStat}} {
+			runner := &recordingRunner{runner: &agentlesstest.FakeRunner{}}
+			updates, deepCalls := 0, 0
+			c := capDeepCollector("deep", second, third, &updates)
+			c.reads = []agentless.Read{procStat}
+			c.deep = func(agentless.Target, agentless.Input) ([]agentless.Read, error) { deepCalls++; return third, nil }
+			s, err := agentless.NewScraper(runner, []agentless.Collector{c}, util.TestLogger(t))
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{})
+			require.NoError(t, err)
+			assertCollectorSuccess(t, result, map[string]float64{"deep": 1})
+			require.Equal(t, 1, deepCalls)
+			calls := 1
+			if len(second) != 0 && second[0].ID != procStat.ID {
+				calls = 2
+			}
+			require.Len(t, runner.batches, calls)
+		}
+	}
+}
+
 func TestScrapeExpansionBatchFailureKeepsFixedResults(t *testing.T) {
 	for _, mode := range []string{"error", "short", "wrong ID", "failed read"} {
 		t.Run(mode, func(t *testing.T) {

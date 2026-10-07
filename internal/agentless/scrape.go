@@ -37,14 +37,19 @@ var (
 	)
 )
 
-// MaxExpandedReads bounds the reads returned by one Expander.
+// MaxExpandedReads bounds the reads returned by one collector across both
+// expansion phases, including duplicates.
 const MaxExpandedReads = 1024
 
 // MaxExpandedReadsPerScrape bounds the deduplicated additional reads executed
-// in phase two. A collector that would exceed it is rejected in its entirety.
+// across phases two and three. A collector that would exceed it is rejected in
+// its entirety, with no metrics exported from it.
 const MaxExpandedReadsPerScrape = 4096
 
-// Scraper runs the fixed batch and, when needed, one expansion batch per scrape.
+// MaxDeepListings bounds the phase-two listings returned by one DeepExpander.
+const MaxDeepListings = 64
+
+// Scraper runs the fixed batch and up to two expansion batches per scrape.
 type Scraper struct {
 	runner     Runner
 	collectors []Collector
@@ -103,6 +108,7 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 		seen[read.ID] = read
 	}
 	var expanded []Read
+	counts := make([]int, len(s.collectors))
 	participants := make([]bool, len(s.collectors))
 	for i, c := range s.collectors {
 		e, ok := c.(Expander)
@@ -112,6 +118,9 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 		reads, err := expand(ctx, e, target, in)
 		if err == nil && len(reads) > MaxExpandedReads {
 			err = fmt.Errorf("collector expanded read limit exceeded")
+		}
+		if _, deep := c.(DeepExpander); deep && err == nil {
+			err = validateDeepListings(reads)
 		}
 		// Validate atomically: a bad final read must not schedule any of this
 		// collector's reads or consume capacity needed by another collector.
@@ -148,6 +157,7 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 			seen[read.ID] = read
 		}
 		expanded = append(expanded, additional...)
+		counts[i] = len(reads)
 		for _, read := range reads {
 			if _, present := in[read.ID]; !present {
 				participants[i] = true
@@ -170,7 +180,94 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 			}
 		}
 	}
+	var third []Read
+	participants = make([]bool, len(s.collectors))
+	for i, c := range s.collectors {
+		e, ok := c.(DeepExpander)
+		if !ok || failures[i] != nil {
+			continue
+		}
+		reads, err := expandDeep(ctx, e, target, in)
+		if err == nil && counts[i]+len(reads) > MaxExpandedReads {
+			err = fmt.Errorf("collector expanded read limit exceeded")
+		}
+		var additional []Read
+		local := make(map[string]Read)
+		if err == nil {
+			for _, read := range reads {
+				if err = read.Validate(); err != nil {
+					break
+				}
+				if read.Path == "" {
+					err = fmt.Errorf("deep expansion must return only file reads")
+					break
+				}
+				prev, exists := seen[read.ID]
+				if !exists {
+					prev, exists = local[read.ID]
+				}
+				if exists {
+					if !sameRead(prev, read) {
+						err = fmt.Errorf("read ID %q is used for two different reads", read.ID)
+						break
+					}
+					continue
+				}
+				local[read.ID] = read
+				additional = append(additional, read)
+			}
+		}
+		if err == nil && len(expanded)+len(third)+len(additional) > MaxExpandedReadsPerScrape {
+			err = fmt.Errorf("scrape expanded read limit exceeded")
+		}
+		if err != nil {
+			failures[i] = err
+			continue
+		}
+		for _, read := range additional {
+			seen[read.ID] = read
+		}
+		third = append(third, additional...)
+		for _, read := range reads {
+			if _, present := in[read.ID]; !present {
+				participants[i] = true
+			}
+		}
+	}
+	if len(third) != 0 {
+		results, err := s.run(ctx, target, third)
+		if err != nil {
+			for i, participant := range participants {
+				if participant {
+					failures[i] = err
+				}
+			}
+		} else {
+			for id, result := range results {
+				in[id] = result
+			}
+		}
+	}
 	return &scrapeResult{ctx: ctx, collectors: s.collectors, in: in, target: target, logger: s.logger, failures: failures}, nil
+}
+
+// validateDeepListings restricts phase-two commands without changing the
+// existing Expander command contract. Validate still checks every read.
+func validateDeepListings(reads []Read) error {
+	listings := 0
+	for _, read := range reads {
+		if len(read.Argv) == 0 {
+			continue
+		}
+		if len(read.Argv) != 3 || read.Argv[0] != "ls" || read.Argv[1] != "-1" || !strings.HasPrefix(read.Argv[2], "/") {
+			return fmt.Errorf("deep expansion command must be ls -1 of an absolute directory")
+		}
+		listings++
+	}
+	if listings > MaxDeepListings {
+		return fmt.Errorf("collector deep listing limit exceeded")
+	}
+	return nil
 }
 
 // run validates the Runner's framing contract before exposing any results.
@@ -202,6 +299,18 @@ func expand(ctx context.Context, e Expander, target Target, in Input) (reads []R
 		return nil, err
 	}
 	return e.Expand(target, in)
+}
+
+func expandDeep(ctx context.Context, e DeepExpander, target Target, in Input) (reads []Read, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("collector %s deep expansion panicked: %v", e.Name(), p)
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return e.ExpandDeep(target, in)
 }
 
 type scrapeResult struct {

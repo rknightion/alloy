@@ -128,6 +128,63 @@ func TestCheckExpanderFromFixtureListing(t *testing.T) {
 	})
 }
 
+// deepLoadCollector discovers loadavg through a second-level fixture listing.
+// The inherited parser checks the final file contents against the oracle.
+type deepLoadCollector struct {
+	loadCollector
+	t                    *testing.T
+	expands, deepExpands *int
+}
+
+func (deepLoadCollector) Reads() []agentless.Read { return []agentless.Read{loadListing} }
+func (c deepLoadCollector) Expand(_ agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+	*c.expands++
+	require.Len(c.t, in, 1)
+	output, err := in.Output(loadListing)
+	if err != nil {
+		return nil, err
+	}
+	var reads []agentless.Read
+	for _, name := range strings.Fields(string(output)) {
+		reads = append(reads, agentless.CommandRead("ls", "-1", "/proc/"+name))
+	}
+	return reads, nil
+}
+func (c deepLoadCollector) ExpandDeep(_ agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+	*c.deepExpands++
+	require.Len(c.t, in, 2)
+	output, err := in.Output(loadListing)
+	if err != nil {
+		return nil, err
+	}
+	var reads []agentless.Read
+	for _, name := range strings.Fields(string(output)) {
+		files, err := in.Output(agentless.CommandRead("ls", "-1", "/proc/"+name))
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range strings.Fields(string(files)) {
+			reads = append(reads, agentless.FileRead("/proc/"+name+"/"+file))
+		}
+	}
+	return reads, nil
+}
+
+func TestCheckDeepExpanderFromFixtureListing(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "proc/nested"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "proc/nested/loadavg"), []byte("2 3 4 1/10 9\n"), 0o600))
+	expected := filepath.Join(root, "expected")
+	require.NoError(t, os.WriteFile(expected, []byte("# HELP node_load1 1m load average.\n# TYPE node_load1 gauge\nnode_load1 2\n# HELP node_load5 5m load average.\n# TYPE node_load5 gauge\nnode_load5 3\n# HELP node_load15 15m load average.\n# TYPE node_load15 gauge\nnode_load15 4\n"), 0o600))
+	expands, deepExpands := 0, 0
+	conformance.Check(t, conformance.Case{
+		Collector: deepLoadCollector{loadCollector: loadCollector{read: agentless.FileRead("/proc/nested/loadavg")}, t: t, expands: &expands, deepExpands: &deepExpands},
+		Families:  []string{"node_load1", "node_load5", "node_load15"}, Root: root, Expected: expected,
+	})
+	require.Equal(t, 1, expands)
+	require.Equal(t, 1, deepExpands)
+}
+
 // A real testing.TB cannot be faked (it has private methods). Subprocesses
 // assert that Check itself fails the test, not merely that a comparison helper
 // returns an error. A deadline bounds each deliberately failing test process.

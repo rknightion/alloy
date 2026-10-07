@@ -20,6 +20,7 @@ import (
 	"io/fs"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/grafana/alloy/internal/agentless"
@@ -131,8 +132,16 @@ func Check(t testing.TB, c Case) {
 		for _, read := range reads {
 			seen[read.ID] = read
 		}
+		deep, isDeep := c.Collector.(agentless.DeepExpander)
+		listings := 0
 		var second []agentless.Read
 		for _, read := range expanded {
+			if isDeep && len(read.Argv) != 0 {
+				if len(read.Argv) != 3 || read.Argv[0] != "ls" || read.Argv[1] != "-1" || !strings.HasPrefix(read.Argv[2], "/") {
+					t.Fatal("conformance: deep expansion command must be ls -1 of an absolute directory")
+				}
+				listings++
+			}
 			if err := read.Validate(); err != nil {
 				t.Fatalf("conformance: invalid expanded read: %v", err)
 			}
@@ -145,6 +154,9 @@ func Check(t testing.TB, c Case) {
 			seen[read.ID] = read
 			second = append(second, read)
 		}
+		if listings > agentless.MaxDeepListings {
+			t.Fatal("conformance: deep listing limit exceeded")
+		}
 		if len(second) != 0 {
 			results, err := runner.Run(context.Background(), target, second)
 			if err != nil {
@@ -152,6 +164,41 @@ func Check(t testing.TB, c Case) {
 			}
 			for _, result := range results {
 				in[result.Read.ID] = result
+			}
+		}
+		if isDeep {
+			third, err := deep.ExpandDeep(target, in)
+			if err != nil {
+				t.Fatalf("conformance: ExpandDeep failed: %v", err)
+			}
+			if len(expanded)+len(third) > agentless.MaxExpandedReads {
+				t.Fatal("conformance: combined expanded read limit exceeded")
+			}
+			var additional []agentless.Read
+			for _, read := range third {
+				if err := read.Validate(); err != nil {
+					t.Fatalf("conformance: invalid deep read: %v", err)
+				}
+				if read.Path == "" {
+					t.Fatal("conformance: deep expansion must return only file reads")
+				}
+				if prev, exists := seen[read.ID]; exists {
+					if prev.Path != read.Path || !slices.Equal(prev.Argv, read.Argv) {
+						t.Fatalf("conformance: conflicting deep read ID %q", read.ID)
+					}
+					continue
+				}
+				seen[read.ID] = read
+				additional = append(additional, read)
+			}
+			if len(additional) != 0 {
+				results, err := runner.Run(context.Background(), target, additional)
+				if err != nil {
+					t.Fatalf("conformance: deep fixture runner: %v", err)
+				}
+				for _, result := range results {
+					in[result.Read.ID] = result
+				}
 			}
 		}
 	}
