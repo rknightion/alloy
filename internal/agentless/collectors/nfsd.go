@@ -25,7 +25,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "nfsd", OS: "linux", DefaultEnabled: false, Factory: newNFSdCollector})
+	Register(Registration{Name: "nfsd", OS: "linux", DefaultEnabled: true, Factory: newNFSdCollector})
 }
 
 type nfsdCollector struct{ requestsDesc *prometheus.Desc }

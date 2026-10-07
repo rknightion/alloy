@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "dmi", OS: "linux", DefaultEnabled: false, Factory: newDMICollector})
+	Register(Registration{Name: "dmi", OS: "linux", DefaultEnabled: true, Factory: newDMICollector})
 }
 
 type dmiCollector struct{}

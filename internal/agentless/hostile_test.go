@@ -173,6 +173,17 @@ func TestHostileDefaultCollectorsHeap(t *testing.T) {
 		"file:/proc/sys/kernel/domainname":                {"domain\n", "", "domain\n", 0},
 		"file:/proc/vmstat":                               {"pgfault 1\n", "", "pgfault%d 1\n", 0},
 	}
+	// Fourth-wave defaults: add fixed-read cases without changing the existing corpus.
+	fixtures["file:/proc/net/rpc/nfsd"] = fixture{"rc 0 0 1\n", "", "rc 0 0 1\n", 0}
+	fixtures["file:/proc/net/arp"] = fixture{"192.0.2.1 0x1 0x2 00:11:22:33:44:55 * eth0\n", "", "192.0.2.1 0x1 0x2 00:11:22:33:44:55 * eth0\n", 1}
+	for _, attribute := range []string{
+		"bios_date", "bios_release", "bios_vendor", "bios_version",
+		"board_asset_tag", "board_name", "board_serial", "board_vendor", "board_version",
+		"chassis_asset_tag", "chassis_serial", "chassis_vendor", "chassis_version",
+		"product_family", "product_name", "product_serial", "product_sku", "product_uuid", "product_version", "sys_vendor",
+	} {
+		fixtures["file:/sys/class/dmi/id/"+attribute] = fixture{"vendor\n", "", "vendor\n", 0}
+	}
 	fill := func(f fixture) []byte {
 		var b strings.Builder
 		b.WriteString(f.header)

@@ -31,13 +31,13 @@ func TestARPRegistration(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "arp", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "arp")
+	require.Contains(t, DefaultEnabled(), "arp")
 	found := false
 	for _, registration := range Registered() {
 		if registration.Name == "arp" {
 			found = true
 			require.Equal(t, "linux", registration.OS)
-			require.False(t, registration.DefaultEnabled)
+			require.True(t, registration.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

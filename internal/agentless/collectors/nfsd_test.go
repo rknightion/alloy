@@ -51,13 +51,13 @@ func TestNFSdRegistration(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "nfsd", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "nfsd")
+	require.Contains(t, DefaultEnabled(), "nfsd")
 	found := false
 	for _, registration := range Registered() {
 		if registration.Name == "nfsd" {
 			found = true
 			require.Equal(t, "linux", registration.OS)
-			require.False(t, registration.DefaultEnabled)
+			require.True(t, registration.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

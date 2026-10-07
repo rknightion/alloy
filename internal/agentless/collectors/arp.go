@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "arp", OS: "linux", DefaultEnabled: false, Factory: newARPCollector})
+	Register(Registration{Name: "arp", OS: "linux", DefaultEnabled: true, Factory: newARPCollector})
 }
 
 type arpCollector struct{ entries *prometheus.Desc }

@@ -71,7 +71,7 @@ Updates to inline content also replace trust through component configuration upd
 A failed file reload retains the previous snapshot and increments `agentless_ssh_known_hosts_reload_failures_total`.
 Malformed-content diagnostics don't include the supplied host key content.
 
-An empty `enabled_collectors` list enables the 22 default collectors: `conntrack`, `cpu`, `diskstats`, `entropy`, `filefd`, `filesystem`, `ipvs`, `loadavg`, `mdadm`, `meminfo`, `netdev`, `netstat`, `nfs`, `os`, `pressure`, `schedstat`, `sockstat`, `softnet`, `stat`, `udp_queues`, `uname`, and `vmstat`.
+An empty `enabled_collectors` list enables the 25 default collectors: `arp`, `conntrack`, `cpu`, `diskstats`, `dmi`, `entropy`, `filefd`, `filesystem`, `ipvs`, `loadavg`, `mdadm`, `meminfo`, `netdev`, `netstat`, `nfs`, `nfsd`, `os`, `pressure`, `schedstat`, `sockstat`, `softnet`, `stat`, `udp_queues`, `uname`, and `vmstat`.
 Unknown or duplicate collector names cause a configuration error.
 Timeouts must be positive, `max_concurrent_dials` must be at least `1`, and `max_sessions_per_target` must be between `1` and `9`.
 Addresses must be unique, including equivalent host and port forms.
@@ -92,9 +92,11 @@ You can't supply custom commands.
 
 | Name | Fixed reads | Metrics |
 | ---- | ----------- | ------- |
+| `arp` | `/proc/net/arp`. | ARP entry counts by device (`node_arp_entries`). |
 | `conntrack` | `/proc/sys/net/netfilter/nf_conntrack_count`, `/proc/sys/net/netfilter/nf_conntrack_max`, and `/proc/net/stat/nf_conntrack`. | Connection tracking entry, limit, and statistics gauges (`node_nf_conntrack_*`). |
 | `cpu` | `/proc/stat`. | CPU time counters (`node_cpu_seconds_total`). |
 | `diskstats` | `/proc/diskstats`. | Disk I/O counters and gauges (`node_disk_*`). |
+| `dmi` | Twenty fixed files under `/sys/class/dmi/id`: `bios_date`, `bios_release`, `bios_vendor`, `bios_version`, `board_asset_tag`, `board_name`, `board_serial`, `board_vendor`, `board_version`, `chassis_asset_tag`, `chassis_serial`, `chassis_vendor`, `chassis_version`, `product_family`, `product_name`, `product_serial`, `product_sku`, `product_uuid`, `product_version`, and `sys_vendor`. | DMI identity labels (`node_dmi_info`), with `sys_vendor` exported as `system_vendor`. Unavailable or unreadable attributes are omitted. |
 | `entropy` | `/proc/sys/kernel/random/entropy_avail` and `/proc/sys/kernel/random/poolsize`. | Entropy gauges (`node_entropy_available_bits` and `node_entropy_pool_size_bits`). |
 | `filefd` | `/proc/sys/fs/file-nr`. | File descriptor gauges (`node_filefd_allocated` and `node_filefd_maximum`). |
 | `filesystem` | `env LC_ALL=C df -akPT`, `env LC_ALL=C df -aiPT`, and `/proc/self/mounts`. | Space, inode, read-only, and device-error gauges (`node_filesystem_*`). |
@@ -105,6 +107,7 @@ You can't supply custom commands.
 | `netdev` | `/proc/net/dev`. | Network receive and transmit counters (`node_network_*`). |
 | `netstat` | `/proc/net/snmp`, `/proc/net/snmp6`, and `/proc/net/netstat`. | Selected protocol statistics (`node_netstat_*`). |
 | `nfs` | `/proc/net/rpc/nfs`. | NFS client network, RPC, and procedure counters (`node_nfs_*`). |
+| `nfsd` | `/proc/net/rpc/nfsd`. | NFS server reply cache, file handle, I/O, thread, read-ahead, network, RPC, and procedure metrics (`node_nfsd_*`). |
 | `os` | `/etc/os-release`, with `/usr/lib/os-release` as fallback. | OS identity (`node_os_info`). |
 | `pressure` | `/proc/pressure/cpu`, `/proc/pressure/memory`, `/proc/pressure/io`, and `/proc/pressure/irq`. | CPU, memory, and I/O waiting time counters and memory and I/O stalled time counters (`node_pressure_*_seconds_total`). CPU full and IRQ statistics aren't exported. |
 | `schedstat` | `/proc/schedstat`. | Per-CPU running and waiting time counters and timeslice counters (`node_schedstat_*`). |
