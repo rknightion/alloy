@@ -1,0 +1,14 @@
+# HELP node_edac_correctable_errors_total Total correctable memory errors.
+# TYPE node_edac_correctable_errors_total counter
+node_edac_correctable_errors_total{controller="0"} 1
+# HELP node_edac_uncorrectable_errors_total Total uncorrectable memory errors.
+# TYPE node_edac_uncorrectable_errors_total counter
+node_edac_uncorrectable_errors_total{controller="0"} 5
+# HELP node_edac_csrow_correctable_errors_total Total correctable memory errors for this csrow.
+# TYPE node_edac_csrow_correctable_errors_total counter
+node_edac_csrow_correctable_errors_total{controller="0",csrow="unknown"} 2
+node_edac_csrow_correctable_errors_total{controller="0",csrow="0"} 3
+# HELP node_edac_csrow_uncorrectable_errors_total Total uncorrectable memory errors for this csrow.
+# TYPE node_edac_csrow_uncorrectable_errors_total counter
+node_edac_csrow_uncorrectable_errors_total{controller="0",csrow="unknown"} 6
+node_edac_csrow_uncorrectable_errors_total{controller="0",csrow="0"} 4
