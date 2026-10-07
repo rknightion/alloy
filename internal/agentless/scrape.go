@@ -37,7 +37,14 @@ var (
 	)
 )
 
-// Scraper runs one batch per scrape for a fixed set of collectors.
+// MaxExpandedReads bounds the reads returned by one Expander.
+const MaxExpandedReads = 256
+
+// MaxExpandedReadsPerScrape bounds the deduplicated additional reads executed
+// in phase two. A collector that would exceed it is rejected in its entirety.
+const MaxExpandedReadsPerScrape = 1024
+
+// Scraper runs the fixed batch and, when needed, one expansion batch per scrape.
 type Scraper struct {
 	runner     Runner
 	collectors []Collector
@@ -74,33 +81,127 @@ func NewScraper(runner Runner, collectors []Collector, logger *slog.Logger) (*Sc
 // Reads returns the deduplicated batch the Scraper runs on every scrape.
 func (s *Scraper) Reads() []Read { return s.reads }
 
-// Scrape runs the batch against target and returns a prometheus.Collector
+// Scrape runs the batches against target and returns a prometheus.Collector
 // holding the parsed metrics. It returns an error when the batch could not run
 // at all; a caller serving HTTP should then fail the scrape so that the
 // scraper's up metric reports the target as down.
 //
 // The returned collector emits, per collector, node_scrape_collector_success
-// (1 when Update returned nil without panicking, exceeding output limits or
-// ending the scrape context) and
+// (1 when expansion succeeded and Update returned nil without panicking,
+// exceeding output limits or ending the scrape context) and
 // node_scrape_collector_duration_seconds (the time spent in Update, which
 // excludes the remote round trip shared by the whole batch). Serve it with
 // promhttp's ContinueOnError so that one bad series does not fail the scrape.
 func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collector, error) {
-	results, err := s.runner.Run(ctx, target, s.reads)
+	in, err := s.run(ctx, target, s.reads)
 	if err != nil {
 		return nil, err
 	}
-	if len(results) != len(s.reads) {
-		return nil, fmt.Errorf("runner returned %d results for %d reads", len(results), len(s.reads))
+	failures := make([]error, len(s.collectors))
+	seen := make(map[string]Read, len(s.reads))
+	for _, read := range s.reads {
+		seen[read.ID] = read
+	}
+	var expanded []Read
+	participants := make([]bool, len(s.collectors))
+	for i, c := range s.collectors {
+		e, ok := c.(Expander)
+		if !ok {
+			continue
+		}
+		reads, err := expand(ctx, e, target, in)
+		if err == nil && len(reads) > MaxExpandedReads {
+			err = fmt.Errorf("collector expanded read limit exceeded")
+		}
+		// Validate atomically: a bad final read must not schedule any of this
+		// collector's reads or consume capacity needed by another collector.
+		var additional []Read
+		local := make(map[string]Read)
+		if err == nil {
+			for _, read := range reads {
+				if err = read.Validate(); err != nil {
+					break
+				}
+				prev, exists := seen[read.ID]
+				if !exists {
+					prev, exists = local[read.ID]
+				}
+				if exists {
+					if !sameRead(prev, read) {
+						err = fmt.Errorf("read ID %q is used for two different reads", read.ID)
+						break
+					}
+					continue
+				}
+				local[read.ID] = read
+				additional = append(additional, read)
+			}
+		}
+		if err == nil && len(expanded)+len(additional) > MaxExpandedReadsPerScrape {
+			err = fmt.Errorf("scrape expanded read limit exceeded")
+		}
+		if err != nil {
+			failures[i] = err
+			continue
+		}
+		for _, read := range additional {
+			seen[read.ID] = read
+		}
+		expanded = append(expanded, additional...)
+		for _, read := range reads {
+			if _, present := in[read.ID]; !present {
+				participants[i] = true
+			}
+		}
+	}
+	if len(expanded) != 0 {
+		second, err := s.run(ctx, target, expanded)
+		if err != nil {
+			// The fixed batch remains trustworthy; only collectors needing
+			// phase-two results fail when that batch cannot be trusted.
+			for i, participant := range participants {
+				if participant {
+					failures[i] = err
+				}
+			}
+		} else {
+			for id, result := range second {
+				in[id] = result
+			}
+		}
+	}
+	return &scrapeResult{ctx: ctx, collectors: s.collectors, in: in, target: target, logger: s.logger, failures: failures}, nil
+}
+
+// run validates the Runner's framing contract before exposing any results.
+func (s *Scraper) run(ctx context.Context, target Target, reads []Read) (Input, error) {
+	results, err := s.runner.Run(ctx, target, reads)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) != len(reads) {
+		return nil, fmt.Errorf("runner returned %d results for %d reads", len(results), len(reads))
 	}
 	in := make(Input, len(results))
 	for i, res := range results {
-		if res.Read.ID != s.reads[i].ID {
-			return nil, fmt.Errorf("runner returned result %q at position %d, want %q", res.Read.ID, i, s.reads[i].ID)
+		if res.Read.ID != reads[i].ID {
+			return nil, fmt.Errorf("runner returned result %q at position %d, want %q", res.Read.ID, i, reads[i].ID)
 		}
 		in[res.Read.ID] = res
 	}
-	return &scrapeResult{ctx: ctx, collectors: s.collectors, in: in, target: target, logger: s.logger}, nil
+	return in, nil
+}
+
+func expand(ctx context.Context, e Expander, target Target, in Input) (reads []Read, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("collector %s expansion panicked: %v", e.Name(), p)
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return e.Expand(target, in)
 }
 
 type scrapeResult struct {
@@ -109,6 +210,7 @@ type scrapeResult struct {
 	in         Input
 	target     Target
 	logger     *slog.Logger
+	failures   []error
 }
 
 // Describe implements prometheus.Collector. The result is an unchecked
@@ -117,9 +219,13 @@ func (r *scrapeResult) Describe(chan<- *prometheus.Desc) {}
 
 // Collect implements prometheus.Collector.
 func (r *scrapeResult) Collect(ch chan<- prometheus.Metric) {
-	for _, c := range r.collectors {
+	for i, c := range r.collectors {
 		start := time.Now()
-		metrics, err := r.buffer(c)
+		err := r.failures[i]
+		var metrics []prometheus.Metric
+		if err == nil {
+			metrics, err = r.buffer(c)
+		}
 		for _, m := range metrics {
 			ch <- m
 		}

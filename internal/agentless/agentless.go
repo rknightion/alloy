@@ -138,7 +138,7 @@ type Runner interface {
 	Run(ctx context.Context, target Target, reads []Read) ([]Result, error)
 }
 
-// Input holds the results of one batch, keyed by Read.ID.
+// Input holds the results of a scrape's batches, keyed by Read.ID.
 type Input map[string]Result
 
 // Output returns the output of read r. It returns an error when the read is
@@ -178,4 +178,16 @@ type Collector interface {
 	// scrape. Metrics sent before the error are still exported. A panic is
 	// recovered by the Scraper and counts as an error.
 	Update(target Target, in Input, ch chan<- prometheus.Metric) error
+}
+
+// Expander optionally adds one bounded batch of reads after the fixed Reads
+// have completed. A listing uses CommandRead("ls", "-1", fixedDirectory);
+// Expand may derive file paths from its output, but every returned Read must
+// pass Validate. Expand is called once per scrape, never recursively, and must
+// be safe for concurrent calls for different targets, just like Update.
+// Update receives the combined results of both phases. An expansion failure
+// skips only this collector's Update.
+type Expander interface {
+	Collector
+	Expand(target Target, in Input) ([]Read, error)
 }

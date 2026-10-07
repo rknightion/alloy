@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/grafana/alloy/internal/agentless"
@@ -330,4 +333,287 @@ func TestValidateRejectsAssignmentAsCommand(t *testing.T) {
 	require.Error(t, agentless.CommandRead("PATH=/tmp", "df").Validate())
 	require.Error(t, agentless.CommandRead("cat", "/proc/../etc/shadow").Validate())
 	require.NoError(t, agentless.CommandRead("df", "-kPT").Validate())
+}
+
+// expandingCollector keeps the fixed Collector contract and opts into phase two.
+type expandingCollector struct {
+	name   string
+	reads  []agentless.Read
+	expand func(agentless.Target, agentless.Input) ([]agentless.Read, error)
+	update func(agentless.Target, agentless.Input, chan<- prometheus.Metric) error
+}
+
+func (c expandingCollector) Name() string            { return c.name }
+func (c expandingCollector) Reads() []agentless.Read { return c.reads }
+func (c expandingCollector) Expand(target agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+	return c.expand(target, in)
+}
+func (c expandingCollector) Update(target agentless.Target, in agentless.Input, ch chan<- prometheus.Metric) error {
+	return c.update(target, in, ch)
+}
+
+type recordingRunner struct {
+	runner  agentless.Runner
+	batches [][]agentless.Read
+	fail    func(int, []agentless.Result) ([]agentless.Result, error)
+}
+
+func (r *recordingRunner) Run(ctx context.Context, target agentless.Target, reads []agentless.Read) ([]agentless.Result, error) {
+	r.batches = append(r.batches, append([]agentless.Read(nil), reads...))
+	results, err := r.runner.Run(ctx, target, reads)
+	if err == nil && r.fail != nil {
+		return r.fail(len(r.batches), results)
+	}
+	return results, err
+}
+
+func assertCollectorSuccess(t *testing.T, c prometheus.Collector, want map[string]float64) {
+	t.Helper()
+	reg := prometheus.NewRegistry()
+	require.NoError(t, reg.Register(c))
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	got := make(map[string]float64)
+	for _, family := range families {
+		if family.GetName() == "node_scrape_collector_success" {
+			for _, metric := range family.Metric {
+				got[metric.Label[0].GetValue()] = metric.GetGauge().GetValue()
+			}
+		}
+	}
+	require.Equal(t, want, got)
+}
+
+func generatedReads(prefix string, n int) []agentless.Read {
+	reads := make([]agentless.Read, n)
+	for i := range reads {
+		reads[i] = agentless.FileRead(fmt.Sprintf("/sys/%s/%d", prefix, i))
+	}
+	return reads
+}
+
+func TestScrapeExpanderTwoPhasesFromFixture(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sys/devices/b"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sys/devices/a"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sys/devices/.hidden"), 0o700))
+	for _, name := range []string{"a", "b"} {
+		require.NoError(t, os.WriteFile(filepath.Join(root, "sys/devices", name, "value"), []byte("42\n"), 0o600))
+	}
+	listing := agentless.CommandRead("ls", "-1", "/sys/devices")
+	target := agentless.Target{Address: "fixture", Auth: "fixture-auth"}
+	expansions, updates := 0, 0
+	makeCollector := func(name string) expandingCollector {
+		return expandingCollector{name: name, reads: []agentless.Read{listing},
+			expand: func(got agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+				expansions++
+				require.Equal(t, target, got)
+				require.Len(t, in, 1, "every Expand sees only phase one")
+				output, err := in.Output(listing)
+				require.NoError(t, err)
+				require.Equal(t, "a\nb\n", string(output))
+				reads := []agentless.Read{listing} // Already present; never rerun it.
+				for _, entry := range strings.Fields(string(output)) {
+					reads = append(reads, agentless.FileRead("/sys/devices/"+entry+"/value"))
+				}
+				return append(reads, reads[1]), nil // Also deduplicate within a collector.
+			},
+			update: func(got agentless.Target, in agentless.Input, ch chan<- prometheus.Metric) error {
+				updates++
+				assert.Equal(t, target, got)
+				assert.Len(t, in, 3)
+				for _, entry := range []string{"a", "b"} {
+					output, err := in.Output(agentless.FileRead("/sys/devices/" + entry + "/value"))
+					assert.NoError(t, err)
+					assert.Equal(t, "42\n", string(output))
+				}
+				ch <- prometheus.MustNewConstMetric(lineDesc, prometheus.GaugeValue, 2, name)
+				return nil
+			},
+		}
+	}
+	fixture, err := agentlesstest.FromFS(root, nil, []agentless.Read{listing})
+	require.NoError(t, err)
+	runner := &recordingRunner{runner: fixture}
+	s, err := agentless.NewScraper(runner, []agentless.Collector{makeCollector("a"), makeCollector("b")}, util.TestLogger(t))
+	require.NoError(t, err)
+	result, err := s.Scrape(t.Context(), target)
+	require.NoError(t, err)
+	require.Equal(t, [][]agentless.Read{{listing}, {agentless.FileRead("/sys/devices/a/value"), agentless.FileRead("/sys/devices/b/value")}}, runner.batches)
+	require.Equal(t, 2, expansions, "exactly one Expand per collector, no recursive listing")
+	assertCollectorSuccess(t, result, map[string]float64{"a": 1, "b": 1})
+	require.Equal(t, 2, updates)
+}
+
+func TestScrapeExpansionFailuresAreIsolated(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		expand func(agentless.Target, agentless.Input) ([]agentless.Read, error)
+	}{
+		{"over cap", func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return generatedReads("bad", 257), nil
+		}},
+		{"duplicate over cap", func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			reads := make([]agentless.Read, 257)
+			for i := range reads {
+				reads[i] = procStat
+			}
+			return reads, nil
+		}},
+		{"invalid path", func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return []agentless.Read{agentless.FileRead("/sys/bad/ok"), agentless.FileRead("/sys/bad/../escape")}, nil
+		}},
+		{"invalid command", func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return []agentless.Read{agentless.CommandRead("cat", "$(id)")}, nil
+		}},
+		{"error", func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return generatedReads("bad", 1), errors.New("listing failed")
+		}},
+		{"panic", func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			panic("hostile listing")
+		}},
+		{"conflict fixed", func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return []agentless.Read{{ID: procStat.ID, Path: "/sys/bad/value"}}, nil
+		}},
+		{"conflict within expansion", func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return []agentless.Read{{ID: "conflict", Path: "/sys/bad/a"}, {ID: "conflict", Path: "/sys/bad/b"}}, nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			goodRead := agentless.FileRead("/sys/good/value")
+			runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{
+				procStat.ID: {Output: []byte("cpu 1\n")}, goodRead.ID: {Output: []byte("ok\n")},
+			}}}
+			bad := expandingCollector{name: "bad", expand: tc.expand,
+				update: func(agentless.Target, agentless.Input, chan<- prometheus.Metric) error {
+					t.Error("rejected collector must not Update")
+					return nil
+				}}
+			good := expandingCollector{name: "expanded", expand: func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+				return []agentless.Read{goodRead}, nil
+			}, update: func(_ agentless.Target, in agentless.Input, _ chan<- prometheus.Metric) error {
+				_, err := in.Output(goodRead)
+				return err
+			}}
+			s, err := agentless.NewScraper(runner, []agentless.Collector{bad, good, lineCounter{"fixed"}}, util.TestLogger(t))
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{})
+			require.NoError(t, err)
+			require.Equal(t, [][]agentless.Read{{procStat}, {goodRead}}, runner.batches, "no rejected read may reach Runner")
+			assertCollectorSuccess(t, result, map[string]float64{"bad": 0, "expanded": 1, "fixed": 1})
+		})
+	}
+}
+
+func TestScrapeExpansionScrapeCap(t *testing.T) {
+	runner := &recordingRunner{runner: &agentlesstest.FakeRunner{}}
+	var collectors []agentless.Collector
+	want := map[string]float64{}
+	for i := 0; i < 6; i++ {
+		name := fmt.Sprintf("expanded%d", i)
+		reads := generatedReads(name, 256)
+		// Four batches fill the scrape cap exactly. The fifth fails, and a
+		// sixth sharing already admitted reads succeeds without more capacity.
+		if i == 5 {
+			reads = generatedReads("expanded0", 256)
+		}
+		collectors = append(collectors, expandingCollector{name: name,
+			expand: func(agentless.Target, agentless.Input) ([]agentless.Read, error) { return reads, nil },
+			update: func(_ agentless.Target, in agentless.Input, _ chan<- prometheus.Metric) error {
+				assert.NotEqual(t, 4, i, "over-scrape-cap collector must not Update")
+				assert.Len(t, in, 1024)
+				return nil
+			}})
+		want[name] = 1
+		if i == 4 {
+			want[name] = 0
+		}
+	}
+	s, err := agentless.NewScraper(runner, collectors, util.TestLogger(t))
+	require.NoError(t, err)
+	result, err := s.Scrape(t.Context(), agentless.Target{})
+	require.NoError(t, err)
+	require.Len(t, runner.batches, 2)
+	require.Len(t, runner.batches[1], 1024)
+	assertCollectorSuccess(t, result, want)
+}
+
+func TestScrapeExpansionConflictingCollectors(t *testing.T) {
+	read := agentless.FileRead("/sys/good/value")
+	runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{read.ID: {Output: []byte("ok\n")}}}}
+	good := expandingCollector{name: "good",
+		expand: func(agentless.Target, agentless.Input) ([]agentless.Read, error) { return []agentless.Read{read}, nil },
+		update: func(_ agentless.Target, in agentless.Input, _ chan<- prometheus.Metric) error {
+			_, err := in.Output(read)
+			return err
+		}}
+	bad := expandingCollector{name: "bad",
+		expand: func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
+			return []agentless.Read{agentless.FileRead("/sys/bad/value"), {ID: read.ID, Path: "/sys/bad/conflict"}}, nil
+		},
+		update: func(agentless.Target, agentless.Input, chan<- prometheus.Metric) error {
+			t.Error("conflicting collector must not Update")
+			return nil
+		}}
+	s, err := agentless.NewScraper(runner, []agentless.Collector{good, bad}, util.TestLogger(t))
+	require.NoError(t, err)
+	result, err := s.Scrape(t.Context(), agentless.Target{})
+	require.NoError(t, err)
+	require.Len(t, runner.batches, 2)
+	require.Equal(t, []agentless.Read{read}, runner.batches[1], "reject all conflicting collector reads")
+	assertCollectorSuccess(t, result, map[string]float64{"good": 1, "bad": 0})
+}
+
+func TestScrapeExpansionEmptyOrFixedNeedsNoSecondBatch(t *testing.T) {
+	for _, reads := range [][]agentless.Read{nil, {procStat}} {
+		runner := &agentlesstest.FakeRunner{Results: map[string]agentless.Result{procStat.ID: {Output: []byte("cpu 1\n")}}}
+		c := expandingCollector{name: "expanded", reads: []agentless.Read{procStat},
+			expand: func(agentless.Target, agentless.Input) ([]agentless.Read, error) { return reads, nil },
+			update: func(_ agentless.Target, in agentless.Input, _ chan<- prometheus.Metric) error {
+				_, err := in.Output(procStat)
+				return err
+			}}
+		s, err := agentless.NewScraper(runner, []agentless.Collector{c}, util.TestLogger(t))
+		require.NoError(t, err)
+		result, err := s.Scrape(t.Context(), agentless.Target{})
+		require.NoError(t, err)
+		require.Equal(t, 1, runner.Calls())
+		assertCollectorSuccess(t, result, map[string]float64{"expanded": 1})
+	}
+}
+
+func TestScrapeExpansionBatchFailureKeepsFixedResults(t *testing.T) {
+	for _, mode := range []string{"error", "short", "wrong ID", "failed read"} {
+		t.Run(mode, func(t *testing.T) {
+			read := agentless.FileRead("/sys/value")
+			runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: map[string]agentless.Result{
+				procStat.ID: {Output: []byte("cpu 1\n")},
+			}}, fail: func(call int, results []agentless.Result) ([]agentless.Result, error) {
+				if call == 1 {
+					return results, nil
+				}
+				switch mode {
+				case "error":
+					return nil, errors.New("second batch transport failed")
+				case "short":
+					return nil, nil
+				case "wrong ID":
+					results[0].Read = procStat
+				}
+				return results, nil
+			}}
+			c := expandingCollector{name: "expanded",
+				expand: func(agentless.Target, agentless.Input) ([]agentless.Read, error) { return []agentless.Read{read}, nil },
+				update: func(_ agentless.Target, in agentless.Input, _ chan<- prometheus.Metric) error {
+					assert.Equal(t, "failed read", mode, "untrustworthy second batch must skip Update")
+					_, err := in.Output(read)
+					return err
+				}}
+			s, err := agentless.NewScraper(runner, []agentless.Collector{c, lineCounter{"fixed"}}, util.TestLogger(t))
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{})
+			require.NoError(t, err)
+			assertCollectorSuccess(t, result, map[string]float64{"expanded": 0, "fixed": 1})
+		})
+	}
 }

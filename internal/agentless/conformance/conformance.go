@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/grafana/alloy/internal/agentless"
@@ -117,6 +118,42 @@ func Check(t testing.TB, c Case) {
 	in := make(agentless.Input, len(results))
 	for _, result := range results {
 		in[result.Read.ID] = result
+	}
+	if expander, ok := c.Collector.(agentless.Expander); ok {
+		expanded, err := expander.Expand(target, in)
+		if err != nil {
+			t.Fatalf("conformance: Expand failed: %v", err)
+		}
+		if len(expanded) > agentless.MaxExpandedReads {
+			t.Fatal("conformance: expanded read limit exceeded")
+		}
+		seen := make(map[string]agentless.Read, len(reads)+len(expanded))
+		for _, read := range reads {
+			seen[read.ID] = read
+		}
+		var second []agentless.Read
+		for _, read := range expanded {
+			if err := read.Validate(); err != nil {
+				t.Fatalf("conformance: invalid expanded read: %v", err)
+			}
+			if prev, exists := seen[read.ID]; exists {
+				if prev.Path != read.Path || !slices.Equal(prev.Argv, read.Argv) {
+					t.Fatalf("conformance: conflicting expanded read ID %q", read.ID)
+				}
+				continue
+			}
+			seen[read.ID] = read
+			second = append(second, read)
+		}
+		if len(second) != 0 {
+			results, err := runner.Run(context.Background(), target, second)
+			if err != nil {
+				t.Fatalf("conformance: expanded fixture runner: %v", err)
+			}
+			for _, result := range results {
+				in[result.Read.ID] = result
+			}
+		}
 	}
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(updateCollector{collector: c.Collector, target: target, input: in})

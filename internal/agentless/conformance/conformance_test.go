@@ -95,6 +95,39 @@ func TestCheckCommandAndCustomOracle(t *testing.T) {
 	conformance.Check(t, c)
 }
 
+// listingLoadCollector proves the conformance harness feeds phase-one listing
+// results to Expand and then supplies dynamically discovered files to Update.
+type listingLoadCollector struct {
+	loadCollector
+}
+
+var loadListing = agentless.CommandRead("ls", "-1", "/proc")
+
+func (listingLoadCollector) Reads() []agentless.Read { return []agentless.Read{loadListing} }
+func (listingLoadCollector) Expand(_ agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+	output, err := in.Output(loadListing)
+	if err != nil {
+		return nil, err
+	}
+	var reads []agentless.Read
+	for _, name := range strings.Fields(string(output)) {
+		reads = append(reads, agentless.FileRead("/proc/"+name))
+	}
+	return reads, nil
+}
+
+func TestCheckExpanderFromFixtureListing(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "proc"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "proc/loadavg"), []byte("2 3 4 1/10 9\n"), 0o600))
+	expected := filepath.Join(root, "expected")
+	require.NoError(t, os.WriteFile(expected, []byte("# HELP node_load1 1m load average.\n# TYPE node_load1 gauge\nnode_load1 2\n# HELP node_load5 5m load average.\n# TYPE node_load5 gauge\nnode_load5 3\n# HELP node_load15 15m load average.\n# TYPE node_load15 gauge\nnode_load15 4\n"), 0o600))
+	conformance.Check(t, conformance.Case{
+		Collector: listingLoadCollector{loadCollector{read: agentless.FileRead("/proc/loadavg")}},
+		Families:  []string{"node_load1", "node_load5", "node_load15"}, Root: root, Expected: expected,
+	})
+}
+
 // A real testing.TB cannot be faked (it has private methods). Subprocesses
 // assert that Check itself fails the test, not merely that a comparison helper
 // returns an error. A deadline bounds each deliberately failing test process.
