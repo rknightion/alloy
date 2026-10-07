@@ -1,0 +1,114 @@
+# HELP node_network_address_assign_type Network device property: address_assign_type
+# TYPE node_network_address_assign_type gauge
+node_network_address_assign_type{device="bond0"} 3
+node_network_address_assign_type{device="dmz"} 3
+node_network_address_assign_type{device="eth0"} 3
+node_network_address_assign_type{device="int"} 3
+# HELP node_network_carrier Network device property: carrier
+# TYPE node_network_carrier gauge
+node_network_carrier{device="bond0"} 1
+node_network_carrier{device="dmz"} 1
+node_network_carrier{device="eth0"} 1
+node_network_carrier{device="int"} 1
+# HELP node_network_carrier_changes_total Network device property: carrier_changes_total
+# TYPE node_network_carrier_changes_total counter
+node_network_carrier_changes_total{device="bond0"} 2
+node_network_carrier_changes_total{device="dmz"} 2
+node_network_carrier_changes_total{device="eth0"} 2
+node_network_carrier_changes_total{device="int"} 2
+# HELP node_network_carrier_down_changes_total Network device property: carrier_down_changes_total
+# TYPE node_network_carrier_down_changes_total counter
+node_network_carrier_down_changes_total{device="bond0"} 1
+node_network_carrier_down_changes_total{device="dmz"} 1
+node_network_carrier_down_changes_total{device="eth0"} 1
+node_network_carrier_down_changes_total{device="int"} 1
+# HELP node_network_carrier_up_changes_total Network device property: carrier_up_changes_total
+# TYPE node_network_carrier_up_changes_total counter
+node_network_carrier_up_changes_total{device="bond0"} 1
+node_network_carrier_up_changes_total{device="dmz"} 1
+node_network_carrier_up_changes_total{device="eth0"} 1
+node_network_carrier_up_changes_total{device="int"} 1
+# HELP node_network_device_id Network device property: device_id
+# TYPE node_network_device_id gauge
+node_network_device_id{device="bond0"} 32
+node_network_device_id{device="dmz"} 32
+node_network_device_id{device="eth0"} 32
+node_network_device_id{device="int"} 32
+# HELP node_network_dormant Network device property: dormant
+# TYPE node_network_dormant gauge
+node_network_dormant{device="bond0"} 1
+node_network_dormant{device="dmz"} 1
+node_network_dormant{device="eth0"} 1
+node_network_dormant{device="int"} 1
+# HELP node_network_flags Network device property: flags
+# TYPE node_network_flags gauge
+node_network_flags{device="bond0"} 4867
+node_network_flags{device="dmz"} 4867
+node_network_flags{device="eth0"} 4867
+node_network_flags{device="int"} 4867
+# HELP node_network_iface_id Network device property: iface_id
+# TYPE node_network_iface_id gauge
+node_network_iface_id{device="bond0"} 2
+node_network_iface_id{device="dmz"} 2
+node_network_iface_id{device="eth0"} 2
+node_network_iface_id{device="int"} 2
+# HELP node_network_iface_link Network device property: iface_link
+# TYPE node_network_iface_link gauge
+node_network_iface_link{device="bond0"} 2
+node_network_iface_link{device="dmz"} 2
+node_network_iface_link{device="eth0"} 2
+node_network_iface_link{device="int"} 2
+# HELP node_network_iface_link_mode Network device property: iface_link_mode
+# TYPE node_network_iface_link_mode gauge
+node_network_iface_link_mode{device="bond0"} 1
+node_network_iface_link_mode{device="dmz"} 1
+node_network_iface_link_mode{device="eth0"} 1
+node_network_iface_link_mode{device="int"} 1
+# HELP node_network_info Non-numeric data from /sys/class/net/<iface>, value is always 1.
+# TYPE node_network_info gauge
+node_network_info{address="01:01:01:01:01:01",adminstate="up",broadcast="ff:ff:ff:ff:ff:ff",device="bond0",duplex="full",ifalias="",operstate="up"} 1
+node_network_info{address="01:01:01:01:01:01",adminstate="up",broadcast="ff:ff:ff:ff:ff:ff",device="dmz",duplex="full",ifalias="",operstate="up"} 1
+node_network_info{address="01:01:01:01:01:01",adminstate="up",broadcast="ff:ff:ff:ff:ff:ff",device="eth0",duplex="full",ifalias="",operstate="up"} 1
+node_network_info{address="01:01:01:01:01:01",adminstate="up",broadcast="ff:ff:ff:ff:ff:ff",device="int",duplex="full",ifalias="",operstate="up"} 1
+# HELP node_network_mtu_bytes Network device property: mtu_bytes
+# TYPE node_network_mtu_bytes gauge
+node_network_mtu_bytes{device="bond0"} 1500
+node_network_mtu_bytes{device="dmz"} 1500
+node_network_mtu_bytes{device="eth0"} 1500
+node_network_mtu_bytes{device="int"} 1500
+# HELP node_network_name_assign_type Network device property: name_assign_type
+# TYPE node_network_name_assign_type gauge
+node_network_name_assign_type{device="bond0"} 2
+node_network_name_assign_type{device="dmz"} 2
+node_network_name_assign_type{device="eth0"} 2
+node_network_name_assign_type{device="int"} 2
+# HELP node_network_net_dev_group Network device property: net_dev_group
+# TYPE node_network_net_dev_group gauge
+node_network_net_dev_group{device="bond0"} 0
+node_network_net_dev_group{device="dmz"} 0
+node_network_net_dev_group{device="eth0"} 0
+node_network_net_dev_group{device="int"} 0
+# HELP node_network_protocol_type Network device property: protocol_type
+# TYPE node_network_protocol_type gauge
+node_network_protocol_type{device="bond0"} 1
+node_network_protocol_type{device="dmz"} 1
+node_network_protocol_type{device="eth0"} 1
+node_network_protocol_type{device="int"} 1
+# HELP node_network_speed_bytes Network device property: speed_bytes
+# TYPE node_network_speed_bytes gauge
+node_network_speed_bytes{device="bond0"} -125000
+node_network_speed_bytes{device="dmz"} 1.25e+08
+node_network_speed_bytes{device="eth0"} 1.25e+08
+node_network_speed_bytes{device="int"} 1.25e+08
+# HELP node_network_transmit_queue_length Network device property: transmit_queue_length
+# TYPE node_network_transmit_queue_length gauge
+node_network_transmit_queue_length{device="bond0"} 1000
+node_network_transmit_queue_length{device="dmz"} 1000
+node_network_transmit_queue_length{device="eth0"} 1000
+node_network_transmit_queue_length{device="int"} 1000
+# HELP node_network_up Value is 1 if operstate is 'up', 0 otherwise.
+# TYPE node_network_up gauge
+node_network_up{device="bond0"} 1
+node_network_up{device="dmz"} 1
+node_network_up{device="eth0"} 1
+node_network_up{device="int"} 1
