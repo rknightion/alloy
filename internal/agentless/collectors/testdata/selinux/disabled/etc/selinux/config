@@ -1,0 +1,3 @@
+# SELinux configuration
+SELINUX=disabled
+SELINUXTYPE=targeted
