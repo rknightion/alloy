@@ -451,10 +451,10 @@ func TestScrapeExpansionFailuresAreIsolated(t *testing.T) {
 		expand func(agentless.Target, agentless.Input) ([]agentless.Read, error)
 	}{
 		{"over cap", func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
-			return generatedReads("bad", 257), nil
+			return generatedReads("bad", 1025), nil
 		}},
 		{"duplicate over cap", func(agentless.Target, agentless.Input) ([]agentless.Read, error) {
-			reads := make([]agentless.Read, 257)
+			reads := make([]agentless.Read, 1025)
 			for i := range reads {
 				reads[i] = procStat
 			}
@@ -511,17 +511,20 @@ func TestScrapeExpansionScrapeCap(t *testing.T) {
 	want := map[string]float64{}
 	for i := 0; i < 6; i++ {
 		name := fmt.Sprintf("expanded%d", i)
-		reads := generatedReads(name, 256)
-		// Four batches fill the scrape cap exactly. The fifth fails, and a
-		// sixth sharing already admitted reads succeeds without more capacity.
-		if i == 5 {
-			reads = generatedReads("expanded0", 256)
+		reads := generatedReads(name, 1024)
+		// Four batches fill the scrape cap exactly. One additional read from
+		// the fifth fails; the sixth shares admitted reads without more capacity.
+		switch i {
+		case 4:
+			reads = generatedReads(name, 1)
+		case 5:
+			reads = generatedReads("expanded0", 1024)
 		}
 		collectors = append(collectors, expandingCollector{name: name,
 			expand: func(agentless.Target, agentless.Input) ([]agentless.Read, error) { return reads, nil },
 			update: func(_ agentless.Target, in agentless.Input, _ chan<- prometheus.Metric) error {
 				assert.NotEqual(t, 4, i, "over-scrape-cap collector must not Update")
-				assert.Len(t, in, 1024)
+				assert.Len(t, in, 4096)
 				return nil
 			}})
 		want[name] = 1
@@ -534,7 +537,7 @@ func TestScrapeExpansionScrapeCap(t *testing.T) {
 	result, err := s.Scrape(t.Context(), agentless.Target{})
 	require.NoError(t, err)
 	require.Len(t, runner.batches, 2)
-	require.Len(t, runner.batches[1], 1024)
+	require.Len(t, runner.batches[1], 4096)
 	assertCollectorSuccess(t, result, want)
 }
 

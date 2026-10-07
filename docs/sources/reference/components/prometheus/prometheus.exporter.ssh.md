@@ -89,7 +89,7 @@ Without the header, the batch uses `timeout`.
 All supported collectors target Linux and are enabled by default.
 The runner combines their fixed reads into one SSH execution per scrape and shares duplicate reads.
 Collectors with listing reads can request a second execution for fixed attribute files derived from validated names.
-Expanded reads are bounded to `256` per collector and `1024` per scrape.
+Expanded reads are bounded to `1024` per collector and `4096` per scrape.
 Exceeding either cap rejects the affected expansion without reading or emitting a truncated subset.
 You can't supply custom commands.
 
@@ -125,7 +125,7 @@ You can't supply custom commands.
 | `zfs` | Eleven fixed files under `/proc/spl/kstat/zfs`: `abdstats`, `arcstats`, `dbufstats`, `dmu_tx`, `dnodestats`, `fm`, `vdev_cache_stats`, `vdev_mirror_stats`, `xuio_stats`, `zfetchstats`, and `zil`. | Numeric kstat families (`node_zfs_*`). Pool and dataset families (`node_zfs_zpool_*` and `node_zfs_zpool_dataset_*`), including pool state, are omitted. |
 
 The `netclass` collector reads these fixed attributes under each validated `/sys/class/net/<interface>/` path: `addr_assign_type`, `carrier`, `carrier_changes`, `carrier_up_count`, `carrier_down_count`, `dev_id`, `dormant`, `flags`, `ifindex`, `iflink`, `link_mode`, `mtu`, `name_assign_type`, `netdev_group`, `speed`, `tx_queue_len`, `type`, `address`, `broadcast`, `duplex`, `operstate`, and `ifalias`.
-Eleven interfaces fit the `256` expanded-read cap (`242` files); twelve don't (`264` files).
+Forty-six interfaces fit the `1024` expanded-read cap (`1012` attribute files, or `1013` reads including the listing); forty-seven don't (`1034` attribute files, or `1035` reads including the listing).
 Too many interfaces fail the collector atomically, without attribute reads or data samples.
 Invalid names and the `bonding_masters` control file are skipped.
 Failed attribute reads are omitted, so an unreadable speed file doesn't fail other interface properties.

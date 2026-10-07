@@ -99,23 +99,23 @@ func TestNetclassListingBoundsAndInvalidNames(t *testing.T) {
 		require.NoError(t, read.Validate())
 		require.True(t, strings.HasPrefix(read.Path, "/sys/class/net/eth0/") || strings.HasPrefix(read.Path, "/sys/class/net/bond0/"))
 	}
-	// The bound is attribute reads, not interfaces: eleven fit, twelve do not.
-	for _, count := range []int{11, 12, 257} {
+	// The bound is attribute reads, not interfaces: 46 fit, 47 do not.
+	for _, count := range []int{46, 47, 1025} {
 		var output strings.Builder
 		for i := 0; i < count; i++ {
 			fmt.Fprintf(&output, "eth%d\n", i)
 		}
 		in[listing.ID] = agentless.Result{Read: listing, Output: []byte(output.String())}
 		reads, err := c.Expand(agentless.Target{}, in)
-		if count == 11 {
+		if count == 46 {
 			require.NoError(t, err)
-			require.Len(t, reads, 242)
+			require.Len(t, reads, 1012)
 		} else {
 			require.ErrorContains(t, err, "expanded read limit")
 			require.Nil(t, reads, "reject atomically, never silently truncate")
 		}
 	}
-	for _, output := range []string{"\n", "eth0", "eth0\n\n", "eth0\neth0\n", strings.Repeat("bad name\n", 257), strings.Repeat("x", 1<<20) + "\n"} {
+	for _, output := range []string{"\n", "eth0", "eth0\n\n", "eth0\neth0\n", strings.Repeat("bad name\n", 1025), strings.Repeat("x", 1<<20) + "\n"} {
 		in[listing.ID] = agentless.Result{Read: listing, Output: []byte(output)}
 		reads, err := c.Expand(agentless.Target{}, in)
 		require.Error(t, err)
@@ -124,7 +124,7 @@ func TestNetclassListingBoundsAndInvalidNames(t *testing.T) {
 		require.Error(t, c.Update(agentless.Target{}, in, ch))
 		require.Empty(t, ch)
 	}
-	in[listing.ID] = agentless.Result{Read: listing, Output: []byte(strings.Repeat("bad name\n", 256))}
+	in[listing.ID] = agentless.Result{Read: listing, Output: []byte(strings.Repeat("bad name\n", 1024))}
 	reads, err = c.Expand(agentless.Target{}, in)
 	require.NoError(t, err)
 	require.Empty(t, reads)
@@ -242,11 +242,15 @@ func (r *netclassRecordingRunner) Run(ctx context.Context, target agentless.Targ
 }
 
 func TestNetclassScraperIsolation(t *testing.T) {
+	var overAttributes strings.Builder
+	for i := 0; i < 47; i++ {
+		fmt.Fprintf(&overAttributes, "eth%d\n", i)
+	}
 	cases := map[string]agentless.Result{
 		"missing": {NotExist: true, ExitStatus: 1}, "empty": {}, "nonzero": {ExitStatus: 2, Output: []byte("eth0\n")},
 		"timeout": {TimedOut: true}, "truncated": {Truncated: true}, "missing timeout": {NotExist: true, TimedOut: true}, "missing truncated": {NotExist: true, Truncated: true},
-		"malformed": {Output: []byte("eth0\n\n")}, "over attributes": {Output: []byte("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\n")},
-		"over interfaces": {Output: []byte(strings.Repeat("bad name\n", 257))}, "valid and invalid": {Output: []byte("eth0\n../evil\nbad name\n")},
+		"malformed": {Output: []byte("eth0\n\n")}, "over attributes": {Output: []byte(overAttributes.String())},
+		"over interfaces": {Output: []byte(strings.Repeat("bad name\n", 1025))}, "valid and invalid": {Output: []byte("eth0\n../evil\nbad name\n")},
 	}
 	for name, listingResult := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -73,9 +73,10 @@ func netclassRead(device, attribute string) agentless.Read {
 }
 
 // Bound rows (even invalid names), name bytes and resulting attribute reads
-// before retaining names. In particular, twelve valid interfaces already
-// exceed the frozen 256-read cap: reject the whole expansion, never truncate.
-// Only 19 fixed families / at most 209 series can be emitted, with each label
+// before retaining names. In particular, 47 valid interfaces already
+// exceed the 1024-read cap: reject the whole expansion, never truncate.
+// Each interface needs 22 attribute reads; 46 fit (1012 reads, plus one listing).
+// Only 19 fixed families / at most 874 series can be emitted, with each label
 // bounded to 4096 bytes, below the existing collector output caps.
 func (c *netclassCollector) devices(in agentless.Input) ([]string, error) {
 	read := c.Reads()[0]

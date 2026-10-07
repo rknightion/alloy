@@ -35,17 +35,21 @@ func (r *hostileExpandedRunner) Run(ctx context.Context, target agentless.Target
 func hostileNetclassExpanded(t *testing.T, collector agentless.Collector) {
 	t.Helper()
 	attributes := []string{"addr_assign_type", "carrier", "carrier_changes", "carrier_up_count", "carrier_down_count", "dev_id", "dormant", "flags", "ifindex", "iflink", "link_mode", "mtu", "name_assign_type", "netdev_group", "speed", "tx_queue_len", "type", "address", "broadcast", "duplex", "operstate", "ifalias"}
-	cases := []string{"baseline", "eleven", "twelve", "invalid_names", "failed_attribute", "hostile_listing"}
+	cases := []string{"baseline", "eleven", "twelve", "forty-six", "forty-seven", "invalid_names", "failed_attribute", "hostile_listing"}
 	cases = append(cases, attributes...)
 	for _, mode := range cases {
 		t.Run(mode, func(t *testing.T) {
 			listing := collector.Reads()[0]
 			count, wantCalls, wantSuccess := 1, 2, 1.0
-			if mode == "eleven" {
+			switch mode {
+			case "eleven":
 				count = 11
-			}
-			if mode == "twelve" {
-				count, wantCalls, wantSuccess = 12, 1, 0
+			case "twelve":
+				count = 12
+			case "forty-six":
+				count = 46
+			case "forty-seven":
+				count, wantCalls, wantSuccess = 47, 1, 0
 			}
 			var names strings.Builder
 			results := map[string]agentless.Result{}

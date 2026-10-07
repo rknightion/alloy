@@ -38,11 +38,11 @@ var (
 )
 
 // MaxExpandedReads bounds the reads returned by one Expander.
-const MaxExpandedReads = 256
+const MaxExpandedReads = 1024
 
 // MaxExpandedReadsPerScrape bounds the deduplicated additional reads executed
 // in phase two. A collector that would exceed it is rejected in its entirety.
-const MaxExpandedReadsPerScrape = 1024
+const MaxExpandedReadsPerScrape = 4096
 
 // Scraper runs the fixed batch and, when needed, one expansion batch per scrape.
 type Scraper struct {
