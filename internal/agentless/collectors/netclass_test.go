@@ -63,13 +63,13 @@ func TestNetclassRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "netclass", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "netclass")
+	require.Contains(t, DefaultEnabled(), "netclass")
 	found := false
 	for _, registration := range Registered() {
 		if registration.Name == "netclass" {
 			found = true
 			require.Equal(t, "linux", registration.OS)
-			require.False(t, registration.DefaultEnabled)
+			require.True(t, registration.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "netclass", OS: "linux", DefaultEnabled: false, Factory: newNetclassCollector})
+	Register(Registration{Name: "netclass", OS: "linux", DefaultEnabled: true, Factory: newNetclassCollector})
 }
 
 // These are all properties exported by the pinned node_exporter's default

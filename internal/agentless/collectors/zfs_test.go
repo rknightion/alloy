@@ -55,11 +55,11 @@ func TestZFSRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "zfs", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "zfs")
+	require.Contains(t, DefaultEnabled(), "zfs")
 	for _, registration := range Registered() {
 		if registration.Name == "zfs" {
 			require.Equal(t, "linux", registration.OS)
-			require.False(t, registration.DefaultEnabled)
+			require.True(t, registration.DefaultEnabled)
 		}
 	}
 	require.Len(t, built[0].Reads(), 11)

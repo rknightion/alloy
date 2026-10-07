@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The pinned exporter has no SELinux fixtures or e2e families. These authored
-// fixtures exercise its three descriptors and go-selinux's 1/0/-1 mode mapping.
+// The pinned exporter e2e includes node_selinux_enabled 0. Authored fixtures
+// still exercise the other states, three descriptors and 1/0/-1 mode mapping.
 // No upstream default families are omitted; disabled emits only enabled.
 func TestSELinuxConformance(t *testing.T) {
 	for _, mode := range []string{"enforcing", "permissive", "disabled"} {
@@ -53,13 +53,13 @@ func TestSELinuxRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "selinux", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "selinux")
+	require.Contains(t, DefaultEnabled(), "selinux")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "selinux" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

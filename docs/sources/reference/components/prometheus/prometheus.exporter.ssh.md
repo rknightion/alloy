@@ -71,7 +71,7 @@ Updates to inline content also replace trust through component configuration upd
 A failed file reload retains the previous snapshot and increments `agentless_ssh_known_hosts_reload_failures_total`.
 Malformed-content diagnostics don't include the supplied host key content.
 
-An empty `enabled_collectors` list enables the 25 default collectors: `arp`, `conntrack`, `cpu`, `diskstats`, `dmi`, `entropy`, `filefd`, `filesystem`, `ipvs`, `loadavg`, `mdadm`, `meminfo`, `netdev`, `netstat`, `nfs`, `nfsd`, `os`, `pressure`, `schedstat`, `sockstat`, `softnet`, `stat`, `udp_queues`, `uname`, and `vmstat`.
+An empty `enabled_collectors` list enables the 28 default collectors: `arp`, `conntrack`, `cpu`, `diskstats`, `dmi`, `entropy`, `filefd`, `filesystem`, `ipvs`, `loadavg`, `mdadm`, `meminfo`, `netclass`, `netdev`, `netstat`, `nfs`, `nfsd`, `os`, `pressure`, `schedstat`, `selinux`, `sockstat`, `softnet`, `stat`, `udp_queues`, `uname`, `vmstat`, and `zfs`.
 Unknown or duplicate collector names cause a configuration error.
 Timeouts must be positive, `max_concurrent_dials` must be at least `1`, and `max_sessions_per_target` must be between `1` and `9`.
 Addresses must be unique, including equivalent host and port forms.
@@ -88,6 +88,9 @@ Without the header, the batch uses `timeout`.
 
 All supported collectors target Linux and are enabled by default.
 The runner combines their fixed reads into one SSH execution per scrape and shares duplicate reads.
+Collectors with listing reads can request a second execution for fixed attribute files derived from validated names.
+Expanded reads are bounded to `256` per collector and `1024` per scrape.
+Exceeding either cap rejects the affected expansion without reading or emitting a truncated subset.
 You can't supply custom commands.
 
 | Name | Fixed reads | Metrics |
@@ -104,6 +107,7 @@ You can't supply custom commands.
 | `loadavg` | `/proc/loadavg`. | Load averages (`node_load1`, `node_load5`, and `node_load15`). |
 | `mdadm` | `/proc/mdstat`. | Software RAID state, disk counts, required disks, blocks, and synced blocks (`node_md_*`). |
 | `meminfo` | `/proc/meminfo`. | Memory gauges (`node_memory_*`). |
+| `netclass` | `ls -1 /sys/class/net`, then 22 fixed attribute files per valid interface. | Sysfs network properties (`node_network_*`), including interface identity and state. Netlink statistics aren't collected. |
 | `netdev` | `/proc/net/dev`. | Network receive and transmit counters (`node_network_*`). |
 | `netstat` | `/proc/net/snmp`, `/proc/net/snmp6`, and `/proc/net/netstat`. | Selected protocol statistics (`node_netstat_*`). |
 | `nfs` | `/proc/net/rpc/nfs`. | NFS client network, RPC, and procedure counters (`node_nfs_*`). |
@@ -111,12 +115,21 @@ You can't supply custom commands.
 | `os` | `/etc/os-release`, with `/usr/lib/os-release` as fallback. | OS identity (`node_os_info`). |
 | `pressure` | `/proc/pressure/cpu`, `/proc/pressure/memory`, `/proc/pressure/io`, and `/proc/pressure/irq`. | CPU, memory, and I/O waiting time counters and memory and I/O stalled time counters (`node_pressure_*_seconds_total`). CPU full and IRQ statistics aren't exported. |
 | `schedstat` | `/proc/schedstat`. | Per-CPU running and waiting time counters and timeslice counters (`node_schedstat_*`). |
+| `selinux` | `/proc/self/mountinfo`, `/sys/fs/selinux/enforce`, and `/etc/selinux/config`. | SELinux enabled, configured mode, and current mode gauges (`node_selinux_*`). Reads mirror the fixed mount detection, config, and enforce inputs; nonstandard mount paths don't change the reads. |
 | `sockstat` | `/proc/net/sockstat`, `/proc/net/sockstat6`, and `getconf PAGESIZE`. | Socket usage and memory gauges (`node_sockstat_*`), using the target's page size for byte values. |
 | `softnet` | `/proc/net/softnet_stat`. | Per-CPU packet processing counters and backlog gauges (`node_softnet_*`). |
 | `stat` | `/proc/stat`. | Boot time, context switches, interrupts, forks, and running or blocked processes. |
 | `udp_queues` | `/proc/net/udp` and `/proc/net/udp6`. | Aggregated transmit and receive queue memory gauges by IP version (`node_udp_queues`). |
 | `uname` | `uname -s`, `uname -n`, `uname -r`, `uname -v`, `uname -m`, and `/proc/sys/kernel/domainname`. | Kernel and host identity (`node_uname_info`). |
 | `vmstat` | `/proc/vmstat`. | Selected virtual memory statistics (`node_vmstat_*`), with fields matching `^(oom_kill\|pgpg\|pswp\|pg.*fault).*`. |
+| `zfs` | Eleven fixed files under `/proc/spl/kstat/zfs`: `abdstats`, `arcstats`, `dbufstats`, `dmu_tx`, `dnodestats`, `fm`, `vdev_cache_stats`, `vdev_mirror_stats`, `xuio_stats`, `zfetchstats`, and `zil`. | Numeric kstat families (`node_zfs_*`). Pool and dataset families (`node_zfs_zpool_*` and `node_zfs_zpool_dataset_*`), including pool state, are omitted. |
+
+The `netclass` collector reads these fixed attributes under each validated `/sys/class/net/<interface>/` path: `addr_assign_type`, `carrier`, `carrier_changes`, `carrier_up_count`, `carrier_down_count`, `dev_id`, `dormant`, `flags`, `ifindex`, `iflink`, `link_mode`, `mtu`, `name_assign_type`, `netdev_group`, `speed`, `tx_queue_len`, `type`, `address`, `broadcast`, `duplex`, `operstate`, and `ifalias`.
+Eleven interfaces fit the `256` expanded-read cap (`242` files); twelve don't (`264` files).
+Too many interfaces fail the collector atomically, without attribute reads or data samples.
+Invalid names and the `bonding_masters` control file are skipped.
+Failed attribute reads are omitted, so an unreadable speed file doesn't fail other interface properties.
+Malformed attribute values fail the collector atomically.
 
 The metric names are compatible with node_exporter for the supported families, not its entire collector set.
 CPU families derived from CPU information or `/sys`, and network families derived from netlink, aren't collected.

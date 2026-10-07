@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "zfs", OS: "linux", DefaultEnabled: false, Factory: newZFSCollector})
+	Register(Registration{Name: "zfs", OS: "linux", DefaultEnabled: true, Factory: newZFSCollector})
 }
 
 type zfsCollector struct{}

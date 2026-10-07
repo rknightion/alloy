@@ -13,7 +13,7 @@ import (
 
 func TestDefaultEnabledCoversTheLandedCollectors(t *testing.T) {
 	require.Equal(t, []string{
-		"arp", "conntrack", "cpu", "diskstats", "dmi", "entropy", "filefd", "filesystem", "ipvs", "loadavg", "mdadm", "meminfo", "netdev", "netstat", "nfs", "nfsd", "os", "pressure", "schedstat", "sockstat", "softnet", "stat", "udp_queues", "uname", "vmstat",
+		"arp", "conntrack", "cpu", "diskstats", "dmi", "entropy", "filefd", "filesystem", "ipvs", "loadavg", "mdadm", "meminfo", "netclass", "netdev", "netstat", "nfs", "nfsd", "os", "pressure", "schedstat", "selinux", "sockstat", "softnet", "stat", "udp_queues", "uname", "vmstat", "zfs",
 	}, collectors.DefaultEnabled())
 }
 

@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "selinux", OS: "linux", DefaultEnabled: false, Factory: newSELinuxCollector})
+	Register(Registration{Name: "selinux", OS: "linux", DefaultEnabled: true, Factory: newSELinuxCollector})
 }
 
 type selinuxCollector struct{ descs [3]*prometheus.Desc }
