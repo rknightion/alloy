@@ -1,0 +1,115 @@
+# HELP node_nfsd_connections_total Total number of NFSd TCP connections.
+# TYPE node_nfsd_connections_total counter
+node_nfsd_connections_total 1
+# HELP node_nfsd_disk_bytes_read_total Total NFSd bytes read.
+# TYPE node_nfsd_disk_bytes_read_total counter
+node_nfsd_disk_bytes_read_total 1.572864e+08
+# HELP node_nfsd_disk_bytes_written_total Total NFSd bytes written.
+# TYPE node_nfsd_disk_bytes_written_total counter
+node_nfsd_disk_bytes_written_total 72864
+# HELP node_nfsd_file_handles_stale_total Total number of NFSd stale file handles
+# TYPE node_nfsd_file_handles_stale_total counter
+node_nfsd_file_handles_stale_total 0
+# HELP node_nfsd_packets_total Total NFSd network packets (sent+received) by protocol type.
+# TYPE node_nfsd_packets_total counter
+node_nfsd_packets_total{proto="tcp"} 917
+node_nfsd_packets_total{proto="udp"} 55
+# HELP node_nfsd_read_ahead_cache_not_found_total Total number of NFSd read ahead cache not found.
+# TYPE node_nfsd_read_ahead_cache_not_found_total counter
+node_nfsd_read_ahead_cache_not_found_total 0
+# HELP node_nfsd_read_ahead_cache_size_blocks How large the read ahead cache is in blocks.
+# TYPE node_nfsd_read_ahead_cache_size_blocks gauge
+node_nfsd_read_ahead_cache_size_blocks 32
+# HELP node_nfsd_reply_cache_hits_total Total number of NFSd Reply Cache hits (client lost server response).
+# TYPE node_nfsd_reply_cache_hits_total counter
+node_nfsd_reply_cache_hits_total 0
+# HELP node_nfsd_reply_cache_misses_total Total number of NFSd Reply Cache an operation that requires caching (idempotent).
+# TYPE node_nfsd_reply_cache_misses_total counter
+node_nfsd_reply_cache_misses_total 6
+# HELP node_nfsd_reply_cache_nocache_total Total number of NFSd Reply Cache non-idempotent operations (rename/delete/…).
+# TYPE node_nfsd_reply_cache_nocache_total counter
+node_nfsd_reply_cache_nocache_total 18622
+# HELP node_nfsd_requests_total Total number NFSd Requests by method and protocol.
+# TYPE node_nfsd_requests_total counter
+node_nfsd_requests_total{method="Access",proto="3"} 111
+node_nfsd_requests_total{method="Access",proto="4"} 1098
+node_nfsd_requests_total{method="Close",proto="4"} 2
+node_nfsd_requests_total{method="Commit",proto="3"} 0
+node_nfsd_requests_total{method="Commit",proto="4"} 0
+node_nfsd_requests_total{method="Create",proto="2"} 0
+node_nfsd_requests_total{method="Create",proto="3"} 0
+node_nfsd_requests_total{method="Create",proto="4"} 0
+node_nfsd_requests_total{method="DelegPurge",proto="4"} 0
+node_nfsd_requests_total{method="DelegReturn",proto="4"} 0
+node_nfsd_requests_total{method="FsInfo",proto="3"} 2
+node_nfsd_requests_total{method="FsStat",proto="2"} 2
+node_nfsd_requests_total{method="FsStat",proto="3"} 0
+node_nfsd_requests_total{method="GetAttr",proto="2"} 69
+node_nfsd_requests_total{method="GetAttr",proto="3"} 112
+node_nfsd_requests_total{method="GetAttr",proto="4"} 8179
+node_nfsd_requests_total{method="GetFH",proto="4"} 5896
+node_nfsd_requests_total{method="Link",proto="2"} 0
+node_nfsd_requests_total{method="Link",proto="3"} 0
+node_nfsd_requests_total{method="Link",proto="4"} 0
+node_nfsd_requests_total{method="Lock",proto="4"} 0
+node_nfsd_requests_total{method="Lockt",proto="4"} 0
+node_nfsd_requests_total{method="Locku",proto="4"} 0
+node_nfsd_requests_total{method="Lookup",proto="2"} 4410
+node_nfsd_requests_total{method="Lookup",proto="3"} 2719
+node_nfsd_requests_total{method="Lookup",proto="4"} 5900
+node_nfsd_requests_total{method="LookupRoot",proto="4"} 0
+node_nfsd_requests_total{method="MkDir",proto="2"} 0
+node_nfsd_requests_total{method="MkDir",proto="3"} 0
+node_nfsd_requests_total{method="MkNod",proto="3"} 0
+node_nfsd_requests_total{method="Nverify",proto="4"} 0
+node_nfsd_requests_total{method="Open",proto="4"} 2
+node_nfsd_requests_total{method="OpenAttr",proto="4"} 0
+node_nfsd_requests_total{method="OpenConfirm",proto="4"} 2
+node_nfsd_requests_total{method="OpenDgrd",proto="4"} 0
+node_nfsd_requests_total{method="PathConf",proto="3"} 1
+node_nfsd_requests_total{method="PutFH",proto="4"} 9609
+node_nfsd_requests_total{method="Read",proto="2"} 0
+node_nfsd_requests_total{method="Read",proto="3"} 0
+node_nfsd_requests_total{method="Read",proto="4"} 150
+node_nfsd_requests_total{method="ReadDir",proto="2"} 99
+node_nfsd_requests_total{method="ReadDir",proto="3"} 27
+node_nfsd_requests_total{method="ReadDir",proto="4"} 1272
+node_nfsd_requests_total{method="ReadDirPlus",proto="3"} 216
+node_nfsd_requests_total{method="ReadLink",proto="2"} 0
+node_nfsd_requests_total{method="ReadLink",proto="3"} 0
+node_nfsd_requests_total{method="ReadLink",proto="4"} 0
+node_nfsd_requests_total{method="RelLockOwner",proto="4"} 0
+node_nfsd_requests_total{method="Remove",proto="2"} 0
+node_nfsd_requests_total{method="Remove",proto="3"} 0
+node_nfsd_requests_total{method="Remove",proto="4"} 0
+node_nfsd_requests_total{method="Rename",proto="2"} 0
+node_nfsd_requests_total{method="Rename",proto="3"} 0
+node_nfsd_requests_total{method="Rename",proto="4"} 0
+node_nfsd_requests_total{method="Renew",proto="4"} 1236
+node_nfsd_requests_total{method="RestoreFH",proto="4"} 0
+node_nfsd_requests_total{method="RmDir",proto="2"} 0
+node_nfsd_requests_total{method="RmDir",proto="3"} 0
+node_nfsd_requests_total{method="Root",proto="2"} 0
+node_nfsd_requests_total{method="SaveFH",proto="4"} 0
+node_nfsd_requests_total{method="SecInfo",proto="4"} 0
+node_nfsd_requests_total{method="SetAttr",proto="2"} 0
+node_nfsd_requests_total{method="SetAttr",proto="3"} 0
+node_nfsd_requests_total{method="SetAttr",proto="4"} 0
+node_nfsd_requests_total{method="SymLink",proto="2"} 0
+node_nfsd_requests_total{method="SymLink",proto="3"} 0
+node_nfsd_requests_total{method="Verify",proto="4"} 0
+node_nfsd_requests_total{method="WrCache",proto="2"} 0
+node_nfsd_requests_total{method="Write",proto="2"} 0
+node_nfsd_requests_total{method="Write",proto="3"} 0
+node_nfsd_requests_total{method="Write",proto="4"} 0
+# HELP node_nfsd_rpc_errors_total Total number of NFSd RPC errors by error type.
+# TYPE node_nfsd_rpc_errors_total counter
+node_nfsd_rpc_errors_total{error="auth"} 2
+node_nfsd_rpc_errors_total{error="cInt"} 0
+node_nfsd_rpc_errors_total{error="fmt"} 1
+# HELP node_nfsd_server_rpcs_total Total number of NFSd RPCs.
+# TYPE node_nfsd_server_rpcs_total counter
+node_nfsd_server_rpcs_total 18628
+# HELP node_nfsd_server_threads Total number of NFSd kernel threads that are running.
+# TYPE node_nfsd_server_threads gauge
+node_nfsd_server_threads 8
