@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "bonding", OS: "linux", DefaultEnabled: false, Factory: newBondingCollector})
+	Register(Registration{Name: "bonding", OS: "linux", DefaultEnabled: true, Factory: newBondingCollector})
 }
 
 type bondingCollector struct{ slaves, active *prometheus.Desc }

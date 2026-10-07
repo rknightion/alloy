@@ -54,13 +54,13 @@ func TestNVMeRegistrationAndReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "nvme", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "nvme")
+	require.Contains(t, DefaultEnabled(), "nvme")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "nvme" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

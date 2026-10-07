@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "nvme", OS: "linux", DefaultEnabled: false, Factory: newNVMeCollector})
+	Register(Registration{Name: "nvme", OS: "linux", DefaultEnabled: true, Factory: newNVMeCollector})
 }
 
 // node_exporter exports the four info labels below. Also read the requested

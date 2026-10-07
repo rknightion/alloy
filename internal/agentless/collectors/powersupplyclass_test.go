@@ -67,13 +67,13 @@ func TestPowersupplyRegistrationAndBounds(t *testing.T) {
 	built, err := Build([]string{"powersupplyclass"}, DefaultConfigs(), nil)
 	require.NoError(t, err)
 	require.Len(t, built, 1)
-	require.NotContains(t, DefaultEnabled(), "powersupplyclass")
+	require.Contains(t, DefaultEnabled(), "powersupplyclass")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "powersupplyclass" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

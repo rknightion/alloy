@@ -71,7 +71,8 @@ Updates to inline content also replace trust through component configuration upd
 A failed file reload retains the previous snapshot and increments `agentless_ssh_known_hosts_reload_failures_total`.
 Malformed-content diagnostics don't include the supplied host key content.
 
-An empty `enabled_collectors` list enables the 28 default collectors: `arp`, `conntrack`, `cpu`, `diskstats`, `dmi`, `entropy`, `filefd`, `filesystem`, `ipvs`, `loadavg`, `mdadm`, `meminfo`, `netclass`, `netdev`, `netstat`, `nfs`, `nfsd`, `os`, `pressure`, `schedstat`, `selinux`, `sockstat`, `softnet`, `stat`, `udp_queues`, `uname`, `vmstat`, and `zfs`.
+An empty `enabled_collectors` list enables the 34 default collectors: `arp`, `bonding`, `conntrack`, `cpu`, `cpufreq`, `diskstats`, `dmi`, `edac`, `entropy`, `filefd`, `filesystem`, `ipvs`, `loadavg`, `mdadm`, `meminfo`, `netclass`, `netdev`, `netstat`, `nfs`, `nfsd`, `nvme`, `os`, `powersupplyclass`, `pressure`, `schedstat`, `selinux`, `sockstat`, `softnet`, `stat`, `thermal_zone`, `udp_queues`, `uname`, `vmstat`, and `zfs`.
+The `hwmon` collector isn't implemented or enabled.
 Unknown or duplicate collector names cause a configuration error.
 Timeouts must be positive, `max_concurrent_dials` must be at least `1`, and `max_sessions_per_target` must be between `1` and `9`.
 Addresses must be unique, including equivalent host and port forms.
@@ -89,17 +90,24 @@ Without the header, the batch uses `timeout`.
 All supported collectors target Linux and are enabled by default.
 The runner combines their fixed reads into one SSH execution per scrape and shares duplicate reads.
 Collectors with listing reads can request a second execution for fixed attribute files derived from validated names.
-Expanded reads are bounded to `1024` per collector and `4096` per scrape.
+The `edac` collector can request second-level directory listings in that execution, followed by a third execution for fixed row attributes.
+A scrape uses at most three executions (phases), not one execution per collector or device.
+Expanded reads share a `1024`-read budget per collector across the second and third phases, including second-level listings.
+The deduplicated additional reads share a `4096`-read budget per scrape across both expansion phases; initial fixed reads don't consume this budget.
+Each deep-expanding collector can request at most `64` second-level listings.
 Exceeding either cap rejects the affected expansion without reading or emitting a truncated subset.
 You can't supply custom commands.
 
 | Name | Fixed reads | Metrics |
 | ---- | ----------- | ------- |
 | `arp` | `/proc/net/arp`. | ARP entry counts by device (`node_arp_entries`). |
+| `bonding` | `/sys/class/net/bonding_masters` and `ls -1 /sys/class/net`, shared with `netclass`; then `bonding/slaves` per primary interface and `bonding_slave/mii_status` per validated interface. | Configured and active member counts (`node_bonding_slaves` and `node_bonding_active`). |
 | `conntrack` | `/proc/sys/net/netfilter/nf_conntrack_count`, `/proc/sys/net/netfilter/nf_conntrack_max`, and `/proc/net/stat/nf_conntrack`. | Connection tracking entry, limit, and statistics gauges (`node_nf_conntrack_*`). |
 | `cpu` | `/proc/stat`. | CPU time counters (`node_cpu_seconds_total`). |
+| `cpufreq` | `ls -1 /sys/devices/system/cpu`, then eight fixed files under each validated `cpu<N>/cpufreq/` path. | CPU frequency gauges in hertz (`node_cpu_*frequency*_hertz`) and governor state (`node_cpu_scaling_governor`). |
 | `diskstats` | `/proc/diskstats`. | Disk I/O counters and gauges (`node_disk_*`). |
 | `dmi` | Twenty fixed files under `/sys/class/dmi/id`: `bios_date`, `bios_release`, `bios_vendor`, `bios_version`, `board_asset_tag`, `board_name`, `board_serial`, `board_vendor`, `board_version`, `chassis_asset_tag`, `chassis_serial`, `chassis_vendor`, `chassis_version`, `product_family`, `product_name`, `product_serial`, `product_sku`, `product_uuid`, `product_version`, and `sys_vendor`. | DMI identity labels (`node_dmi_info`), with `sys_vendor` exported as `system_vendor`. Unavailable or unreadable attributes are omitted. |
+| `edac` | `ls -1 /sys/devices/system/edac/mc`; then `ls -1` of each validated `mc<N>` directory and four controller files; then two fixed files per validated `csrow<N>`. | Correctable and uncorrectable memory error counters (`node_edac_*errors_total`). |
 | `entropy` | `/proc/sys/kernel/random/entropy_avail` and `/proc/sys/kernel/random/poolsize`. | Entropy gauges (`node_entropy_available_bits` and `node_entropy_pool_size_bits`). |
 | `filefd` | `/proc/sys/fs/file-nr`. | File descriptor gauges (`node_filefd_allocated` and `node_filefd_maximum`). |
 | `filesystem` | `env LC_ALL=C df -akPT`, `env LC_ALL=C df -aiPT`, and `/proc/self/mounts`. | Space, inode, read-only, and device-error gauges (`node_filesystem_*`). |
@@ -112,13 +120,16 @@ You can't supply custom commands.
 | `netstat` | `/proc/net/snmp`, `/proc/net/snmp6`, and `/proc/net/netstat`. | Selected protocol statistics (`node_netstat_*`). |
 | `nfs` | `/proc/net/rpc/nfs`. | NFS client network, RPC, and procedure counters (`node_nfs_*`). |
 | `nfsd` | `/proc/net/rpc/nfsd`. | NFS server reply cache, file handle, I/O, thread, read-ahead, network, RPC, and procedure metrics (`node_nfsd_*`). |
+| `nvme` | `ls -1 /sys/class/nvme`, then `firmware_rev`, `model`, `serial`, `state`, and `cntlid` per validated `nvme<N>`. | Controller identity (`node_nvme_info`); `cntlid` is read but isn't exported. Namespace attributes aren't collected. |
 | `os` | `/etc/os-release`, with `/usr/lib/os-release` as fallback. | OS identity (`node_os_info`). |
+| `powersupplyclass` | `ls -1 /sys/class/power_supply`, then 60 fixed attribute files per validated supply. | Numeric power-supply properties (`node_power_supply_*`), with unit conversion; string attributes aren't exported. |
 | `pressure` | `/proc/pressure/cpu`, `/proc/pressure/memory`, `/proc/pressure/io`, and `/proc/pressure/irq`. | CPU, memory, and I/O waiting time counters and memory and I/O stalled time counters (`node_pressure_*_seconds_total`). CPU full and IRQ statistics aren't exported. |
 | `schedstat` | `/proc/schedstat`. | Per-CPU running and waiting time counters and timeslice counters (`node_schedstat_*`). |
 | `selinux` | `/proc/self/mountinfo`, `/sys/fs/selinux/enforce`, and `/etc/selinux/config`. | SELinux enabled, configured mode, and current mode gauges (`node_selinux_*`). Reads mirror the fixed mount detection, config, and enforce inputs; nonstandard mount paths don't change the reads. |
 | `sockstat` | `/proc/net/sockstat`, `/proc/net/sockstat6`, and `getconf PAGESIZE`. | Socket usage and memory gauges (`node_sockstat_*`), using the target's page size for byte values. |
 | `softnet` | `/proc/net/softnet_stat`. | Per-CPU packet processing counters and backlog gauges (`node_softnet_*`). |
 | `stat` | `/proc/stat`. | Boot time, context switches, interrupts, forks, and running or blocked processes. |
+| `thermal_zone` | `ls -1 /sys/class/thermal`, then `type`, `temp`, `policy`, and `mode` per validated `thermal_zone<N>`, and `type`, `cur_state`, and `max_state` per validated `cooling_device<N>`. | Zone temperature in Celsius (`node_thermal_zone_temp`) and cooling-device state (`node_cooling_device_*_state`). |
 | `udp_queues` | `/proc/net/udp` and `/proc/net/udp6`. | Aggregated transmit and receive queue memory gauges by IP version (`node_udp_queues`). |
 | `uname` | `uname -s`, `uname -n`, `uname -r`, `uname -v`, `uname -m`, and `/proc/sys/kernel/domainname`. | Kernel and host identity (`node_uname_info`). |
 | `vmstat` | `/proc/vmstat`. | Selected virtual memory statistics (`node_vmstat_*`), with fields matching `^(oom_kill\|pgpg\|pswp\|pg.*fault).*`. |
@@ -131,8 +142,22 @@ Invalid names and the `bonding_masters` control file are skipped.
 Failed attribute reads are omitted, so an unreadable speed file doesn't fail other interface properties.
 Malformed attribute values fail the collector atomically.
 
+The `cpufreq` collector reads `cpuinfo_cur_freq`, `cpuinfo_min_freq`, `cpuinfo_max_freq`, `scaling_cur_freq`, `scaling_min_freq`, `scaling_max_freq`, `scaling_governor`, and `scaling_available_governors`.
+At most `128` CPUs fit its `1024` additional-read budget.
+
+The `powersupplyclass` collector reads these numeric attributes: `authentic`, `calibrate`, `capacity`, `capacity_alert_max`, `capacity_alert_min`, `cycle_count`, `online`, `present`, `time_to_empty_now`, `time_to_full_now`, `current_boot`, `current_max`, `current_now`, `energy_empty`, `energy_empty_design`, `energy_full`, `energy_full_design`, `energy_now`, `voltage_boot`, `voltage_max`, `voltage_max_design`, `voltage_min`, `voltage_min_design`, `voltage_now`, `voltage_ocv`, `charge_control_limit`, `charge_control_limit_max`, `charge_counter`, `charge_empty`, `charge_empty_design`, `charge_full`, `charge_full_design`, `charge_now`, `charge_term_current`, `constant_charge_current`, `constant_charge_current_max`, `constant_charge_voltage`, `constant_charge_voltage_max`, `precharge_current`, `input_current_limit`, `power_now`, `temp`, `temp_alert_max`, `temp_alert_min`, `temp_ambient`, `temp_ambient_max`, `temp_ambient_min`, `temp_max`, and `temp_min`.
+It also reads `capacity_level`, `charge_type`, `health`, `manufacturer`, `model_name`, `serial_number`, `status`, `technology`, `type`, `usb_type`, and `scope`.
+At most `17` supplies fit (`1020` additional reads); `18` don't (`1080`).
+
+The `edac` collector reads `ce_count`, `ce_noinfo_count`, `ue_count`, and `ue_noinfo_count` per controller, and `ce_count` and `ue_count` per row.
+Controller listings and attributes consume five additional reads per controller, leaving the remainder of the shared `1024` budget for row files.
+For example, one controller and `509` rows consume `1023` additional reads; `510` rows exceed the budget.
+Too many controllers, rows, or listing entries fail the whole collector without publishing a truncated snapshot.
+A missing hardware directory can yield collector success `1` with no hardware samples; a timeout or truncated result isn't treated as absence.
+
 The metric names are compatible with node_exporter for the supported families, not its entire collector set.
-CPU families derived from CPU information or `/sys`, and network families derived from netlink, aren't collected.
+The `cpu` collector doesn't collect CPU information or `/sys`-derived families; `cpufreq` collects the supported sysfs frequency families.
+Network families derived from netlink aren't collected.
 The parser tests compare supported families against node_exporter fixtures where an oracle exists.
 The `netdev`, `filesystem`, and `uname` tests instead use goldens authored from real output, which provide weaker conformance evidence.
 Filesystem byte values use `df`'s 1 KiB blocks and can differ from native filesystem statistics through block rounding.

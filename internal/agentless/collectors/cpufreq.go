@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "cpufreq", OS: "linux", DefaultEnabled: false, Factory: newCpufreqCollector})
+	Register(Registration{Name: "cpufreq", OS: "linux", DefaultEnabled: true, Factory: newCpufreqCollector})
 }
 
 var cpufreqNumbers = [...]struct{ attribute, family, help string }{

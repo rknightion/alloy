@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "powersupplyclass", OS: "linux", DefaultEnabled: false, Factory: newPowersupplyclassCollector})
+	Register(Registration{Name: "powersupplyclass", OS: "linux", DefaultEnabled: true, Factory: newPowersupplyclassCollector})
 }
 
 // Fixed exported attributes from the pinned node_exporter; never enumerate a

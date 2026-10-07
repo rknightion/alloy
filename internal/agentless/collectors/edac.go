@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "edac", OS: "linux", DefaultEnabled: false, Factory: newEdacCollector})
+	Register(Registration{Name: "edac", OS: "linux", DefaultEnabled: true, Factory: newEdacCollector})
 }
 
 const edacRoot = "/sys/devices/system/edac/mc"

@@ -66,13 +66,13 @@ func TestCpufreqRegistration(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "cpufreq", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "cpufreq")
+	require.Contains(t, DefaultEnabled(), "cpufreq")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "cpufreq" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

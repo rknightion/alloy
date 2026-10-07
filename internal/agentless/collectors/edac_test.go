@@ -64,11 +64,11 @@ func TestEdacRegistration(t *testing.T) {
 	built, err := Build([]string{"edac"}, DefaultConfigs(), nil)
 	require.NoError(t, err)
 	require.Len(t, built, 1)
-	require.NotContains(t, DefaultEnabled(), "edac")
+	require.Contains(t, DefaultEnabled(), "edac")
 	for _, r := range Registered() {
 		if r.Name == "edac" {
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	c, in := edacFixture(t)

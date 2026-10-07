@@ -126,6 +126,259 @@ func hostileNetclassExpanded(t *testing.T, collector agentless.Collector) {
 	}
 }
 
+// hostileHardwareRunner supplies ordinary attribute values while recording the
+// actual execution boundary. Only the compiled listing paths receive names.
+type hostileHardwareRunner struct {
+	batches  [][]agentless.Read
+	fixed    map[string]agentless.Result
+	mode     string
+	deepRows int
+}
+
+func (r *hostileHardwareRunner) Run(_ context.Context, _ agentless.Target, reads []agentless.Read) ([]agentless.Result, error) {
+	r.batches = append(r.batches, append([]agentless.Read(nil), reads...))
+	results := make([]agentless.Result, 0, len(reads))
+	for i, read := range reads {
+		result := agentless.Result{Read: read, Output: []byte("1\n")}
+		if fixed, ok := r.fixed[read.ID]; ok {
+			result = fixed
+		} else if len(read.Argv) != 0 {
+			var listing strings.Builder
+			for j := range r.deepRows {
+				fmt.Fprintf(&listing, "csrow%d\n", j)
+			}
+			result.Output = []byte(listing.String())
+			if r.mode == "hostile_deep_listing" {
+				result.Output = []byte(strings.Repeat("ignored\n", ((1<<20)-1)/8))
+			}
+		} else if strings.HasSuffix(read.Path, "/bonding/slaves") {
+			result.Output = []byte("eth0\n")
+		} else if strings.HasSuffix(read.Path, "/bonding_slave/mii_status") {
+			result.Output = []byte("up\n")
+		}
+		// Fail the last attribute, after earlier valid attributes, to prove
+		// whole-collector failure rather than a retained partial snapshot.
+		if r.mode == "failed_attribute" && len(r.batches) == 2 && i == len(reads)-1 {
+			result.ExitStatus = 1
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func hostileHardwareExpanded(t *testing.T, collector agentless.Collector) {
+	t.Helper()
+	name := collector.Name()
+	prefix, width, limit := "", 0, 0
+	switch name {
+	case "thermal_zone":
+		prefix, width, limit = "thermal_zone", 4, 256
+	case "cpufreq":
+		prefix, width, limit = "cpu", 8, 128
+	case "bonding":
+		prefix, width, limit = "eth", 1, 1023 // One additional primary-interface read.
+	case "powersupplyclass":
+		prefix, width, limit = "BAT", 60, 17
+	case "nvme":
+		prefix, width, limit = "nvme", 5, 204
+	case "edac":
+		prefix, width, limit = "mc", 5, 64
+	default:
+		t.Fatalf("missing expanded fixture for %s", name)
+	}
+	modes := []string{"baseline", "at_cap", "over_cap", "hostile_listing", "failed_attribute", "missing_listing", "truncated_missing"}
+	if name == "edac" {
+		modes = append(modes, "deep_at_cap", "deep_over_cap", "hostile_deep_listing")
+	}
+	for _, mode := range modes {
+		t.Run(mode, func(t *testing.T) {
+			count, wantSuccess, wantCalls, deepRows := 1, 1.0, 2, 1
+			if name == "edac" {
+				wantCalls = 3
+			}
+			switch mode {
+			case "at_cap":
+				count = limit
+			case "over_cap":
+				count, wantSuccess, wantCalls = limit+1, 0, 1
+			case "hostile_listing", "truncated_missing":
+				wantSuccess, wantCalls = 0, 1
+			case "missing_listing":
+				wantCalls = 1
+			case "failed_attribute":
+				wantSuccess = 0 // Attribute errors surface during Update, after all planned phases.
+			case "deep_at_cap":
+				deepRows = 509 // 5 + 509*2 = 1023 shared additional reads.
+			case "deep_over_cap":
+				deepRows, wantSuccess, wantCalls = 510, 0, 2
+			case "hostile_deep_listing":
+				wantSuccess, wantCalls = 0, 2
+			}
+			var listing strings.Builder
+			for i := range count {
+				fmt.Fprintf(&listing, "%s%d\n", prefix, i)
+			}
+			fixed := map[string]agentless.Result{}
+			reads := collector.Reads()
+			for _, read := range reads {
+				result := agentless.Result{Read: read, Output: []byte(listing.String())}
+				if read.Path != "" {
+					result.Output = []byte("bond0\n")
+				}
+				switch mode {
+				case "hostile_listing":
+					result.Output = []byte(strings.Repeat("ignored\n", ((1<<20)-1)/8))
+				case "missing_listing", "truncated_missing":
+					result.Output, result.NotExist, result.ExitStatus = nil, true, 1
+					result.Truncated = mode == "truncated_missing"
+				}
+				fixed[read.ID] = result
+			}
+			runner := &hostileHardwareRunner{fixed: fixed, mode: mode, deepRows: deepRows}
+			s, err := agentless.NewScraper(runner, []agentless.Collector{collector}, util.TestLogger(t))
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{Address: "host:22"})
+			require.NoError(t, err)
+			reg := prometheus.NewRegistry()
+			require.NoError(t, reg.Register(result))
+			families, err := reg.Gather()
+			require.NoError(t, err)
+			require.Len(t, runner.batches, wantCalls)
+			require.Equal(t, reads, runner.batches[0])
+			if wantCalls >= 2 {
+				wantReads := count * width
+				if name == "bonding" {
+					wantReads++
+				}
+				require.Len(t, runner.batches[1], wantReads)
+				listings := 0
+				for _, read := range runner.batches[1] {
+					require.NoError(t, read.Validate())
+					if len(read.Argv) != 0 {
+						listings++
+						require.Equal(t, "edac", name)
+						require.Len(t, read.Argv, 3)
+						require.Equal(t, []string{"ls", "-1"}, read.Argv[:2])
+						require.Contains(t, read.Argv[2], "/sys/devices/system/edac/mc/mc")
+					}
+				}
+				if name == "edac" {
+					require.Equal(t, count, listings)
+				}
+			}
+			if wantCalls == 3 {
+				require.Len(t, runner.batches[2], count*deepRows*2)
+				for _, read := range runner.batches[2] {
+					require.NoError(t, read.Validate())
+					require.Empty(t, read.Argv)
+					require.Contains(t, read.Path, "/csrow")
+				}
+			}
+			series, statuses := 0, 0
+			for _, family := range families {
+				switch family.GetName() {
+				case "node_scrape_collector_success":
+					statuses++
+					require.Len(t, family.Metric, 1)
+					require.Equal(t, wantSuccess, family.Metric[0].GetGauge().GetValue())
+				case "node_scrape_collector_duration_seconds":
+				default:
+					series += len(family.Metric)
+				}
+				for _, metric := range family.Metric {
+					for _, label := range metric.Label {
+						require.LessOrEqual(t, len(label.GetValue()), 4096)
+					}
+				}
+			}
+			require.Equal(t, 1, statuses)
+			if wantSuccess == 0 || mode == "missing_listing" {
+				require.Zero(t, series, "no partial data")
+			} else {
+				require.Positive(t, series)
+			}
+			require.LessOrEqual(t, series, 20000)
+			t.Logf("collector=%s case=%s batches=%d series=%d success=%g", name, mode, len(runner.batches), series, wantSuccess)
+		})
+	}
+}
+
+// Exercise the global budget with real default collectors, including EDAC's
+// third phase. These literals are independent of the production cap constants.
+func TestHostileHardwareSharedExpansionBudget(t *testing.T) {
+	for _, mode := range []string{"second_phase", "third_phase_at_cap", "third_phase_over_cap"} {
+		t.Run(mode, func(t *testing.T) {
+			names := []string{"cpufreq", "thermal_zone", "nvme", "powersupplyclass", "edac"}
+			counts := map[string]int{"cpufreq": 128, "thermal_zone": 256, "nvme": 204, "powersupplyclass": 17, "edac": 1, "bonding": 1023}
+			prefixes := map[string]string{"cpufreq": "cpu", "thermal_zone": "thermal_zone", "nvme": "nvme", "powersupplyclass": "BAT", "edac": "mc", "bonding": "eth"}
+			wantFailed, wantCalls, wantSecond, deepRows := "", 3, 4093, 1
+			switch mode {
+			case "second_phase":
+				names = []string{"cpufreq", "thermal_zone", "nvme", "bonding", "powersupplyclass"}
+				wantFailed, wantCalls, wantSecond = "powersupplyclass", 2, 4092
+			case "third_phase_over_cap":
+				deepRows, wantFailed, wantCalls = 2, "edac", 2
+			}
+			cs, err := collectors.Build(names, collectors.DefaultConfigs(), util.TestLogger(t))
+			require.NoError(t, err)
+			fixed := map[string]agentless.Result{}
+			for _, c := range cs {
+				var listing strings.Builder
+				for i := range counts[c.Name()] {
+					fmt.Fprintf(&listing, "%s%d\n", prefixes[c.Name()], i)
+				}
+				for _, read := range c.Reads() {
+					output := listing.String()
+					if read.Path != "" {
+						output = "bond0\n"
+					}
+					fixed[read.ID] = agentless.Result{Read: read, Output: []byte(output)}
+				}
+			}
+			runner := &hostileHardwareRunner{fixed: fixed, deepRows: deepRows}
+			s, err := agentless.NewScraper(runner, cs, util.TestLogger(t))
+			require.NoError(t, err)
+			result, err := s.Scrape(t.Context(), agentless.Target{Address: "host:22"})
+			require.NoError(t, err)
+			reg := prometheus.NewRegistry()
+			require.NoError(t, reg.Register(result))
+			families, err := reg.Gather()
+			require.NoError(t, err)
+			require.Len(t, runner.batches, wantCalls)
+			require.Len(t, runner.batches[1], wantSecond)
+			if wantCalls == 3 {
+				require.Len(t, runner.batches[2], 2)
+			}
+			statuses := map[string]float64{}
+			for _, family := range families {
+				for _, metric := range family.Metric {
+					if family.GetName() == "node_scrape_collector_success" {
+						for _, label := range metric.Label {
+							if label.GetName() == "collector" {
+								statuses[label.GetValue()] = metric.GetGauge().GetValue()
+							}
+						}
+					}
+				}
+				if wantFailed == "edac" {
+					require.NotContains(t, family.GetName(), "node_edac_", "atomic failure")
+				}
+				if wantFailed == "powersupplyclass" {
+					require.NotContains(t, family.GetName(), "node_power_supply_", "atomic failure")
+				}
+			}
+			require.Len(t, statuses, len(cs))
+			for _, name := range names {
+				want := 1.0
+				if name == wantFailed {
+					want = 0
+				}
+				require.Equal(t, want, statuses[name], name)
+			}
+		})
+	}
+}
+
 // Match the security review's seven nearly-1-MiB sections, not a reduced
 // cardinality proxy. Filesystem parsing makes this a slow, opt-in test.
 func hostileResults() map[string]agentless.Result {
@@ -316,6 +569,11 @@ func TestHostileDefaultCollectorsHeap(t *testing.T) {
 	for _, collector := range cs {
 		// Expanded attributes need their own two-phase proof; the existing
 		// fixed-read corpus below intentionally still requires one runner call.
+		switch collector.Name() {
+		case "thermal_zone", "cpufreq", "bonding", "powersupplyclass", "nvme", "edac":
+			t.Run(collector.Name(), func(t *testing.T) { hostileHardwareExpanded(t, collector) })
+			continue
+		}
 		if collector.Name() == "netclass" {
 			t.Run(collector.Name(), func(t *testing.T) { hostileNetclassExpanded(t, collector) })
 			continue

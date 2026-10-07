@@ -15,7 +15,7 @@ import (
 const thermalZoneName = "thermal_zone"
 
 func init() {
-	Register(Registration{Name: thermalZoneName, OS: "linux", DefaultEnabled: false, Factory: newThermalZoneCollector})
+	Register(Registration{Name: thermalZoneName, OS: "linux", DefaultEnabled: true, Factory: newThermalZoneCollector})
 }
 
 var thermalZoneAttributes = [...]string{"type", "temp", "policy", "mode"}

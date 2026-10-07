@@ -51,13 +51,13 @@ func TestBondingRegistrationAndExpansion(t *testing.T) {
 	built, err := Build([]string{"bonding"}, DefaultConfigs(), nil)
 	require.NoError(t, err)
 	require.Len(t, built, 1)
-	require.NotContains(t, DefaultEnabled(), "bonding")
+	require.Contains(t, DefaultEnabled(), "bonding")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "bonding" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)
