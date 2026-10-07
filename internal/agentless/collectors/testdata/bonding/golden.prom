@@ -1,0 +1,10 @@
+# HELP node_bonding_active Number of active slaves per bonding interface.
+# TYPE node_bonding_active gauge
+node_bonding_active{master="bond0"} 0
+node_bonding_active{master="dmz"} 2
+node_bonding_active{master="int"} 1
+# HELP node_bonding_slaves Number of configured slaves per bonding interface.
+# TYPE node_bonding_slaves gauge
+node_bonding_slaves{master="bond0"} 0
+node_bonding_slaves{master="dmz"} 2
+node_bonding_slaves{master="int"} 2
