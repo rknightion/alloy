@@ -974,6 +974,109 @@ func capDeepCollector(name string, second, third []agentless.Read, updates *int)
 		}}, deep: func(agentless.Target, agentless.Input) ([]agentless.Read, error) { return third, nil }}
 }
 
+type limitedDeepCollector struct {
+	deepCollector
+	limit int
+}
+
+func (c limitedDeepCollector) DeepListingLimit() int { return c.limit }
+
+type panickingListingCollector struct{ deepCollector }
+
+func (panickingListingCollector) DeepListingLimit() int { panic("invalid limit callback") }
+
+type limitedExpandingCollector struct{ expandingCollector }
+
+func (limitedExpandingCollector) DeepListingLimit() int { return 0 }
+
+func TestScrapeDeepListingLimitScopeAndPanic(t *testing.T) {
+	updates, plainUpdates, goodUpdates := 0, 0, 0
+	bad := panickingListingCollector{capDeepCollector("panic", nil, nil, &updates)}
+	plain := limitedExpandingCollector{capDeepCollector("plain", generatedReads("plain", 1), nil, &plainUpdates).expandingCollector}
+	good := capDeepCollector("good", nil, nil, &goodUpdates)
+	s, err := agentless.NewScraper(&agentlesstest.FakeRunner{}, []agentless.Collector{bad, plain, good}, util.TestLogger(t))
+	require.NoError(t, err)
+	result, err := s.Scrape(t.Context(), agentless.Target{})
+	require.NoError(t, err)
+	assertCollectorSuccess(t, result, map[string]float64{"panic": 0, "plain": 1, "good": 1})
+	require.Zero(t, updates)
+	require.Equal(t, 1, plainUpdates, "limiter applies only to DeepExpander")
+	require.Equal(t, 1, goodUpdates)
+}
+
+func TestScrapeDeepListingLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		limit, n int
+		declared bool
+		want     float64
+	}{
+		{"default64", 64, 64, false, 1},
+		{"default65", 64, 65, false, 0},
+		{"declared512", 512, 512, true, 1},
+		{"declared513reads", 512, 513, true, 0},
+		{"declared32", 32, 33, true, 0},
+		{"zero", 0, 0, true, 0},
+		{"negative", -1, 0, true, 0},
+		{"aboveCeiling", 513, 0, true, 0},
+	} {
+		for _, phase := range []string{"listings", "earlyLinks", "links", "combined"} {
+			t.Run(tc.name+"/"+phase, func(t *testing.T) {
+				var second, third []agentless.Read
+				results := make(map[string]agentless.Result)
+				for i := range tc.n {
+					path := fmt.Sprintf("/sys/device%d", i)
+					read := agentless.CommandRead("ls", "-1", path)
+					if phase == "earlyLinks" || phase == "links" || phase == "combined" && i >= tc.n/2 {
+						read = agentless.CommandRead("readlink", "-f", path)
+					}
+					if phase == "links" || phase == "combined" && i >= tc.n/2 {
+						third = append(third, read)
+					} else {
+						second = append(second, read)
+					}
+					results[read.ID] = agentless.Result{Output: []byte("/sys/resolved\n")}
+				}
+				runner := &recordingRunner{runner: &agentlesstest.FakeRunner{Results: results}}
+				updates, goodUpdates, expands, deepExpands := 0, 0, 0, 0
+				base := capDeepCollector("limited", second, third, &updates)
+				base.expand = func(agentless.Target, agentless.Input) ([]agentless.Read, error) { expands++; return second, nil }
+				base.deep = func(agentless.Target, agentless.Input) ([]agentless.Read, error) { deepExpands++; return third, nil }
+				var c agentless.Collector = base
+				if tc.declared {
+					c = limitedDeepCollector{base, tc.limit}
+				}
+				good := capDeepCollector("good", generatedReads("good", 1), nil, &goodUpdates)
+				s, err := agentless.NewScraper(runner, []agentless.Collector{c, good}, util.TestLogger(t))
+				require.NoError(t, err)
+				result, err := s.Scrape(t.Context(), agentless.Target{})
+				require.NoError(t, err)
+				assertCollectorSuccess(t, result, map[string]float64{"limited": tc.want, "good": 1})
+				require.Equal(t, int(tc.want), updates)
+				require.Equal(t, 1, goodUpdates)
+				if tc.limit <= 0 || tc.limit > 512 {
+					require.Zero(t, expands, "invalid declarations must fail before expansion")
+					require.Zero(t, deepExpands)
+				}
+				wantSecond, wantThird := 1, 0 // The healthy collector always runs.
+				if tc.limit > 0 && tc.limit <= 512 && len(second) <= tc.limit {
+					wantSecond += len(second)
+					if tc.want == 1 {
+						wantThird = len(third)
+					}
+				}
+				require.Len(t, runner.batches[1], wantSecond, "atomic phase-two admission")
+				if wantThird > 0 {
+					require.Len(t, runner.batches, 3)
+					require.Len(t, runner.batches[2], wantThird)
+				} else {
+					require.Len(t, runner.batches, 2, "no rejected phase-three reads")
+				}
+			})
+		}
+	}
+}
+
 func TestScrapeDeepCombinedCollectorCap(t *testing.T) {
 	for _, n := range []int{512, 513} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {

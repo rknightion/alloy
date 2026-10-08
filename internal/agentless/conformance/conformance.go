@@ -128,6 +128,14 @@ func Check(t testing.TB, c Case) {
 		in[result.Read.ID] = result
 	}
 	if expander, ok := c.Collector.(agentless.Expander); ok {
+		deep, isDeep := c.Collector.(agentless.DeepExpander)
+		listingLimit := agentless.MaxDeepListings
+		if limiter, ok := c.Collector.(agentless.DeepListingLimiter); isDeep && ok {
+			listingLimit = limiter.DeepListingLimit()
+			if listingLimit <= 0 || listingLimit > agentless.MaxDeepListingsCeiling {
+				t.Fatalf("conformance: deep listing limit %d outside [1, %d]", listingLimit, agentless.MaxDeepListingsCeiling)
+			}
+		}
 		expanded, err := expander.Expand(target, in)
 		if err != nil {
 			t.Fatalf("conformance: Expand failed: %v", err)
@@ -139,7 +147,6 @@ func Check(t testing.TB, c Case) {
 		for _, read := range reads {
 			seen[read.ID] = read
 		}
-		deep, isDeep := c.Collector.(agentless.DeepExpander)
 		listings := 0
 		var links, second []agentless.Read
 		for _, read := range expanded {
@@ -164,7 +171,7 @@ func Check(t testing.TB, c Case) {
 			seen[read.ID] = read
 			second = append(second, read)
 		}
-		if listings > agentless.MaxDeepListings {
+		if listings > listingLimit {
 			t.Fatal("conformance: deep listing limit exceeded")
 		}
 		if len(second) != 0 {
@@ -205,7 +212,7 @@ func Check(t testing.TB, c Case) {
 				seen[read.ID] = read
 				additional = append(additional, read)
 			}
-			if listings > agentless.MaxDeepListings {
+			if listings > listingLimit {
 				t.Fatal("conformance: deep listing limit exceeded")
 			}
 			if len(additional) != 0 {

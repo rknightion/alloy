@@ -236,7 +236,8 @@ type Expander interface {
 // Expand may return file reads, CommandRead("ls", "-1", directory), and
 // CommandRead("readlink", "-f", path) reads derived from phase-one listings.
 // All reads must pass Validate. The two expansions share MaxDeepListings for
-// phase-two listings and readlink reads in either expansion.
+// phase-two listings and readlink reads in either expansion, unless the collector
+// implements DeepListingLimiter.
 // ExpandDeep is called once after phase two, with the combined phase-one and
 // phase-two results. It returns validated file or readlink reads, never listings;
 // there is no recursion or fourth phase. Update receives all three phases.
@@ -246,4 +247,18 @@ type Expander interface {
 type DeepExpander interface {
 	Expander
 	ExpandDeep(target Target, in Input) ([]Read, error)
+}
+
+// MaxDeepListingsCeiling is the largest limit a DeepListingLimiter may declare.
+// The shared expanded-read budgets still apply independently of this limit.
+const MaxDeepListingsCeiling = 512
+
+// DeepListingLimiter optionally sets a DeepExpander's combined limit for
+// phase-two listings and readlink reads across both expansions. Without it,
+// MaxDeepListings applies. A declaration outside [1, MaxDeepListingsCeiling]
+// fails only that collector for the scrape, before either expansion runs.
+// DeepListingLimit must be constant and safe for concurrent scrapes.
+// This interface has no effect on collectors that are not DeepExpanders.
+type DeepListingLimiter interface {
+	DeepListingLimit() int
 }

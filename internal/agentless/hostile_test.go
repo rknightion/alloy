@@ -22,6 +22,114 @@ import (
 	"github.com/grafana/alloy/internal/util"
 )
 
+// Exercise the opted-in ceiling at the real batch and Gather boundaries. One
+// nearly-1-MiB listing is poisoned at a time so earlier failures cannot hide it.
+func TestHostileDeepListingLimit512Heap(t *testing.T) {
+	for _, hostileIndex := range []int{-1, 0, 511} {
+		t.Run(fmt.Sprint(hostileIndex), func(t *testing.T) {
+			second := make([]agentless.Read, 0, 512)
+			results := make(map[string]agentless.Result)
+			for i := range 512 {
+				read := agentless.CommandRead("ls", "-1", fmt.Sprintf("/sys/device%d", i))
+				second = append(second, read)
+				output := []byte("value\n")
+				if i == hostileIndex {
+					output = []byte(strings.Repeat("value\n", ((1<<20)-1)/6))
+					require.Greater(t, len(output), 1000000)
+					require.Less(t, len(output), 1<<20)
+				}
+				results[read.ID] = agentless.Result{Output: output}
+				file := agentless.FileRead(fmt.Sprintf("/sys/device%d/value", i))
+				results[file.ID] = agentless.Result{Output: []byte("1\n")}
+			}
+			updates := 0
+			base := capDeepCollector("limited", second, nil, &updates)
+			base.deep = func(_ agentless.Target, in agentless.Input) ([]agentless.Read, error) {
+				var third []agentless.Read
+				for i, read := range second {
+					output, err := in.Output(read)
+					if err != nil {
+						return nil, err
+					}
+					for _, name := range strings.Fields(string(output)) {
+						third = append(third, agentless.FileRead(fmt.Sprintf("/sys/device%d/%s", i, name)))
+						if len(third) > 512 {
+							return nil, fmt.Errorf("too many discovered files")
+						}
+					}
+				}
+				return third, nil
+			}
+			runner := &hostileExpandedRunner{FakeRunner: agentlesstest.FakeRunner{Results: results}}
+			scraper, err := agentless.NewScraper(runner, []agentless.Collector{limitedDeepCollector{base, 512}}, util.TestLogger(t))
+			require.NoError(t, err)
+			runtime.GC()
+			var peak atomic.Uint64
+			var after runtime.MemStats
+			sample := func() {
+				var stats runtime.MemStats
+				runtime.ReadMemStats(&stats)
+				if stats.HeapInuse > peak.Load() {
+					peak.Store(stats.HeapInuse)
+				}
+			}
+			sample()
+			stop, done := make(chan struct{}), make(chan struct{})
+			go func() {
+				defer close(done)
+				ticker := time.NewTicker(time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						sample()
+					case <-stop:
+						return
+					}
+				}
+			}()
+			stopSampler := sync.OnceFunc(func() { close(stop); <-done })
+			t.Cleanup(stopSampler)
+			result, err := scraper.Scrape(t.Context(), agentless.Target{Address: "host:22"})
+			require.NoError(t, err)
+			reg := prometheus.NewRegistry()
+			require.NoError(t, reg.Register(result))
+			families, err := reg.Gather()
+			require.NoError(t, err)
+			stopSampler()
+			runtime.ReadMemStats(&after)
+			sample()
+			require.Less(t, peak.Load(), uint64(64<<20), "hostile processing must stay below 64 MiB of sampled heap")
+			require.Less(t, after.HeapInuse, uint64(64<<20), "hostile Gather must use less than 64 MiB of heap")
+			require.Len(t, runner.batches[1], 512)
+			want, wantCalls := 1.0, 3
+			if hostileIndex >= 0 {
+				want, wantCalls = 0, 2
+			}
+			require.Len(t, runner.batches, wantCalls)
+			if wantCalls == 3 {
+				require.Len(t, runner.batches[2], 512, "both phases share the unchanged 1024 read budget")
+			}
+			series, statuses := 0, 0
+			for _, family := range families {
+				switch family.GetName() {
+				case "node_scrape_collector_success":
+					statuses++
+					require.Equal(t, want, family.Metric[0].GetGauge().GetValue())
+				case "node_scrape_collector_duration_seconds":
+				default:
+					series += len(family.Metric)
+				}
+			}
+			require.Equal(t, 1, statuses)
+			require.Equal(t, int(want), series, "hostile rejection is atomic")
+			require.Equal(t, int(want), updates)
+			t.Logf("hostile_index=%d listings=512 sampled_peak=%d heap_in_use=%d", hostileIndex, peak.Load(), after.HeapInuse)
+			runtime.KeepAlive(families)
+		})
+	}
+}
+
 // hostileExpandedRunner records the real batch boundary, not just Expand output.
 type hostileExpandedRunner struct {
 	agentlesstest.FakeRunner

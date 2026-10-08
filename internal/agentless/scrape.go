@@ -47,7 +47,7 @@ const MaxExpandedReads = 1024
 const MaxExpandedReadsPerScrape = 4096
 
 // MaxDeepListings bounds phase-two listings plus readlink reads across both
-// expansion phases for one collector.
+// expansion phases for one collector without a DeepListingLimiter.
 const MaxDeepListings = 64
 
 // Scraper runs the fixed batch and up to two expansion batches per scrape.
@@ -114,6 +114,7 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 	var expanded []Read
 	counts := make([]int, len(s.collectors))
 	listingCounts := make([]int, len(s.collectors))
+	listingLimits := make([]int, len(s.collectors))
 	links := make([][]Read, len(s.collectors))
 	participants := make([]bool, len(s.collectors))
 	for i, c := range s.collectors {
@@ -121,13 +122,19 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 		if !ok {
 			continue
 		}
+		limit, err := deepListingLimit(c)
+		if err != nil {
+			failures[i] = err
+			continue
+		}
+		listingLimits[i] = limit
 		reads, err := expand(ctx, e, target, in)
 		if err == nil && len(reads) > MaxExpandedReads {
 			err = fmt.Errorf("collector expanded read limit exceeded")
 		}
 		if err == nil {
 			_, deep := c.(DeepExpander)
-			listingCounts[i], err = validateDeepListings(reads, deep)
+			listingCounts[i], err = validateDeepListings(reads, deep, limit)
 		}
 		// Validate atomically: a bad final read must not schedule any of this
 		// collector's reads or consume capacity needed by another collector.
@@ -232,7 +239,7 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 				additional = append(additional, read)
 			}
 		}
-		if err == nil && listingCounts[i]+readlinks > MaxDeepListings {
+		if err == nil && listingCounts[i]+readlinks > listingLimits[i] {
 			err = fmt.Errorf("collector deep listing limit exceeded")
 		}
 		if err == nil && len(expanded)+len(third)+len(additional) > MaxExpandedReadsPerScrape {
@@ -273,9 +280,29 @@ func (s *Scraper) Scrape(ctx context.Context, target Target) (prometheus.Collect
 	return &scrapeResult{ctx: ctx, collectors: s.collectors, in: in, target: target, logger: s.logger, failures: failures}, nil
 }
 
+// deepListingLimit resolves policy once per scrape, with the same panic
+// isolation as expansion callbacks.
+func deepListingLimit(c Collector) (limit int, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("collector %s deep listing limit panicked: %v", c.Name(), p)
+		}
+	}()
+	limit = MaxDeepListings
+	if _, deep := c.(DeepExpander); deep {
+		if limiter, ok := c.(DeepListingLimiter); ok {
+			limit = limiter.DeepListingLimit()
+			if limit <= 0 || limit > MaxDeepListingsCeiling {
+				return 0, fmt.Errorf("collector deep listing limit %d outside [1, %d]", limit, MaxDeepListingsCeiling)
+			}
+		}
+	}
+	return limit, nil
+}
+
 // validateDeepListings restricts phase-two commands without changing the
 // existing Expander command contract. Validate still checks every read.
-func validateDeepListings(reads []Read, deep bool) (int, error) {
+func validateDeepListings(reads []Read, deep bool, limit int) (int, error) {
 	listings := 0
 	for _, read := range reads {
 		if isReadlinkCommand(read) {
@@ -290,7 +317,7 @@ func validateDeepListings(reads []Read, deep bool) (int, error) {
 			listings++
 		}
 	}
-	if listings > MaxDeepListings {
+	if listings > limit {
 		return 0, fmt.Errorf("collector deep listing limit exceeded")
 	}
 	return listings, nil
