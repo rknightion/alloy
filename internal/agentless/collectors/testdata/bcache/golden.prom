@@ -1,0 +1,84 @@
+# HELP node_bcache_active_journal_entries Number of journal entries that are newer than the index.
+# TYPE node_bcache_active_journal_entries gauge
+node_bcache_active_journal_entries{uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 1
+# HELP node_bcache_average_key_size_sectors Average data per key in the btree (sectors).
+# TYPE node_bcache_average_key_size_sectors gauge
+node_bcache_average_key_size_sectors{uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_btree_cache_size_bytes Amount of memory currently used by the btree cache.
+# TYPE node_bcache_btree_cache_size_bytes gauge
+node_bcache_btree_cache_size_bytes{uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_btree_nodes Total nodes in the btree.
+# TYPE node_bcache_btree_nodes gauge
+node_bcache_btree_nodes{uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_btree_read_average_duration_seconds Average btree read duration.
+# TYPE node_bcache_btree_read_average_duration_seconds gauge
+node_bcache_btree_read_average_duration_seconds{uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 1.305e-06
+# HELP node_bcache_bypassed_bytes_total Amount of IO (both reads and writes) that has bypassed the cache.
+# TYPE node_bcache_bypassed_bytes_total counter
+node_bcache_bypassed_bytes_total{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_cache_available_percent Percentage of cache device without dirty data, usable for writeback (may contain clean cached data).
+# TYPE node_bcache_cache_available_percent gauge
+node_bcache_cache_available_percent{uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 100
+# HELP node_bcache_cache_bypass_hits_total Hits for IO intended to skip the cache.
+# TYPE node_bcache_cache_bypass_hits_total counter
+node_bcache_cache_bypass_hits_total{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_cache_bypass_misses_total Misses for IO intended to skip the cache.
+# TYPE node_bcache_cache_bypass_misses_total counter
+node_bcache_cache_bypass_misses_total{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_cache_hits_total Hits counted per individual IO as bcache sees them.
+# TYPE node_bcache_cache_hits_total counter
+node_bcache_cache_hits_total{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 546
+# HELP node_bcache_cache_miss_collisions_total Instances where data insertion from cache miss raced with write (data already present).
+# TYPE node_bcache_cache_miss_collisions_total counter
+node_bcache_cache_miss_collisions_total{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_cache_misses_total Misses counted per individual IO as bcache sees them.
+# TYPE node_bcache_cache_misses_total counter
+node_bcache_cache_misses_total{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_cache_read_races_total Counts instances where while data was being read from the cache, the bucket was reused and invalidated - i.e. where the pointer was stale after the read completed.
+# TYPE node_bcache_cache_read_races_total counter
+node_bcache_cache_read_races_total{uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_cache_readaheads_total Count of times readahead occurred.
+# TYPE node_bcache_cache_readaheads_total counter
+node_bcache_cache_readaheads_total{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 13
+# HELP node_bcache_congested Congestion.
+# TYPE node_bcache_congested gauge
+node_bcache_congested{uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_dirty_data_bytes Amount of dirty data for this backing device in the cache.
+# TYPE node_bcache_dirty_data_bytes gauge
+node_bcache_dirty_data_bytes{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_dirty_target_bytes Current dirty data target threshold for this backing device in bytes.
+# TYPE node_bcache_dirty_target_bytes gauge
+node_bcache_dirty_target_bytes{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 2.189426688e+10
+# HELP node_bcache_io_errors Number of errors that have occurred, decayed by io_error_halflife.
+# TYPE node_bcache_io_errors gauge
+node_bcache_io_errors{cache_device="cache0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_metadata_written_bytes_total Sum of all non data writes (btree writes and all other metadata).
+# TYPE node_bcache_metadata_written_bytes_total counter
+node_bcache_metadata_written_bytes_total{cache_device="cache0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 512
+# HELP node_bcache_priority_stats_metadata_percent Bcache's metadata overhead.
+# TYPE node_bcache_priority_stats_metadata_percent gauge
+node_bcache_priority_stats_metadata_percent{cache_device="cache0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_priority_stats_unused_percent The percentage of the cache that doesn't contain any data.
+# TYPE node_bcache_priority_stats_unused_percent gauge
+node_bcache_priority_stats_unused_percent{cache_device="cache0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 99
+# HELP node_bcache_root_usage_percent Percentage of the root btree node in use (tree depth increases if too high).
+# TYPE node_bcache_root_usage_percent gauge
+node_bcache_root_usage_percent{uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_tree_depth Depth of the btree.
+# TYPE node_bcache_tree_depth gauge
+node_bcache_tree_depth{uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
+# HELP node_bcache_writeback_change Last writeback rate change step for this backing device.
+# TYPE node_bcache_writeback_change gauge
+node_bcache_writeback_change{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 329204
+# HELP node_bcache_writeback_rate Current writeback rate for this backing device in bytes.
+# TYPE node_bcache_writeback_rate gauge
+node_bcache_writeback_rate{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 1.150976e+06
+# HELP node_bcache_writeback_rate_integral_term Current result of integral controller, part of writeback rate
+# TYPE node_bcache_writeback_rate_integral_term gauge
+node_bcache_writeback_rate_integral_term{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 808960
+# HELP node_bcache_writeback_rate_proportional_term Current result of proportional controller, part of writeback rate
+# TYPE node_bcache_writeback_rate_proportional_term gauge
+node_bcache_writeback_rate_proportional_term{backing_device="bdev0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 437748
+# HELP node_bcache_written_bytes_total Sum of all data that has been written to the cache.
+# TYPE node_bcache_written_bytes_total counter
+node_bcache_written_bytes_total{cache_device="cache0",uuid="deaddd54-c735-46d5-868e-f331c5fd7c74"} 0
