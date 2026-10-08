@@ -71,8 +71,8 @@ Updates to inline content also replace trust through component configuration upd
 A failed file reload retains the previous snapshot and increments `agentless_ssh_known_hosts_reload_failures_total`.
 Malformed-content diagnostics don't include the supplied host key content.
 
-An empty `enabled_collectors` list enables the 37 default collectors: `arp`, `bonding`, `btrfs`, `conntrack`, `cpu`, `cpufreq`, `diskstats`, `dmi`, `edac`, `entropy`, `fibrechannel`, `filefd`, `filesystem`, `ipvs`, `loadavg`, `mdadm`, `meminfo`, `netclass`, `netdev`, `netstat`, `nfs`, `nfsd`, `nvme`, `os`, `powersupplyclass`, `pressure`, `schedstat`, `selinux`, `sockstat`, `softnet`, `stat`, `tapestats`, `thermal_zone`, `udp_queues`, `uname`, `vmstat`, and `zfs`.
-The `xfs`, `bcache`, `infiniband`, and `hwmon` collectors aren't implemented or enabled.
+An empty `enabled_collectors` list enables the 40 default collectors: `arp`, `bcache`, `bonding`, `btrfs`, `conntrack`, `cpu`, `cpufreq`, `diskstats`, `dmi`, `edac`, `entropy`, `fibrechannel`, `filefd`, `filesystem`, `infiniband`, `ipvs`, `loadavg`, `mdadm`, `meminfo`, `netclass`, `netdev`, `netstat`, `nfs`, `nfsd`, `nvme`, `os`, `powersupplyclass`, `pressure`, `schedstat`, `selinux`, `sockstat`, `softnet`, `stat`, `tapestats`, `thermal_zone`, `udp_queues`, `uname`, `vmstat`, `xfs`, and `zfs`.
+The `hwmon` collector isn't available.
 Unknown or duplicate collector names cause a configuration error.
 Timeouts must be positive, `max_concurrent_dials` must be at least `1`, and `max_sessions_per_target` must be between `1` and `9`.
 Addresses must be unique, including equivalent host and port forms.
@@ -90,7 +90,7 @@ Without the header, the batch uses `timeout`.
 All supported collectors target Linux and are enabled by default.
 The runner combines their fixed reads into one SSH execution per scrape and shares duplicate reads.
 Collectors with listing reads can request a second execution for fixed attribute files derived from validated names.
-The `edac` and `btrfs` collectors can request second-level directory listings in that execution, followed by a third execution for fixed attributes.
+The `edac`, `btrfs`, `bcache`, and `infiniband` collectors can request second-level directory listings in that execution, followed by a third execution for fixed attributes.
 A scrape uses at most three executions (phases), not one execution per collector or device.
 Expanded reads share a `1024`-read budget per collector across the second and third phases, including second-level listings.
 The deduplicated additional reads share a `4096`-read budget per scrape across both expansion phases; initial fixed reads don't consume this budget.
@@ -104,6 +104,7 @@ You can't supply custom commands.
 | Name | Fixed reads | Metrics |
 | ---- | ----------- | ------- |
 | `arp` | `/proc/net/arp`. | ARP entry counts by device (`node_arp_entries`). |
+| `bcache` | `ls -1 /sys/fs/bcache`; then `ls -1` of each validated cache-set directory and ten cache-set files; then nine fixed files per backing device and three per cache device. Refer to the attribute lists below. | All 26 default cache-set, backing-device, and cache-device families (`node_bcache_*`). The two opt-in priority-statistics families aren't collected. |
 | `bonding` | `/sys/class/net/bonding_masters` and `ls -1 /sys/class/net`, shared with `netclass`; then `bonding/slaves` per primary interface and `bonding_slave/mii_status` per validated interface. | Configured and active member counts (`node_bonding_slaves` and `node_bonding_active`). |
 | `btrfs` | `ls -1 /sys/fs/btrfs`; then `ls -1` of each validated filesystem's `devices`, `allocation/data`, `allocation/metadata`, and `allocation/system` directories, plus `label`, `metadata_uuid`, `allocation/global_rsv_size`, and each allocation group's `bytes_reserved`; then `devices/<device>/size` and each validated allocation mode's `used_bytes` and `total_bytes`. | Sysfs filesystem identity, reserve, allocation, and device-size gauges (`node_btrfs_*`). Device error counters (`node_btrfs_device_errors_total`), unused device bytes (`node_btrfs_device_unused_bytes`), and the `btrfs_dev_uuid` label require ioctls and aren't collected. |
 | `conntrack` | `/proc/sys/net/netfilter/nf_conntrack_count`, `/proc/sys/net/netfilter/nf_conntrack_max`, and `/proc/net/stat/nf_conntrack`. | Connection tracking entry, limit, and statistics gauges (`node_nf_conntrack_*`). |
@@ -116,6 +117,7 @@ You can't supply custom commands.
 | `fibrechannel` | `ls -1 /sys/class/fc_host`, then eleven identity attributes and fourteen statistics files per validated host. | Host identity (`node_fibrechannel_info`) and traffic and error counters (`node_fibrechannel_*_total`). `node_name` is read but isn't exported. |
 | `filefd` | `/proc/sys/fs/file-nr`. | File descriptor gauges (`node_filefd_allocated` and `node_filefd_maximum`). |
 | `filesystem` | `env LC_ALL=C df -akPT`, `env LC_ALL=C df -aiPT`, and `/proc/self/mounts`. | Space, inode, read-only, and device-error gauges (`node_filesystem_*`). |
+| `infiniband` | `ls -1 /sys/class/infiniband`; then `ls -1` of each validated device's `ports` directory and `board_id`, `fw_ver`, and `hca_type`; then 27 fixed files per validated port. Refer to the attribute lists below. | Device identity and 27 port counter, state, and rate families (`node_infiniband_*`), including legacy counters. Six unsampled upstream families aren't collected. |
 | `ipvs` | `/proc/net/ip_vs_stats` and `/proc/net/ip_vs`. | IP virtual server traffic counters and backend connection and weight gauges (`node_ipvs_*`). |
 | `loadavg` | `/proc/loadavg`. | Load averages (`node_load1`, `node_load5`, and `node_load15`). |
 | `mdadm` | `/proc/mdstat`. | Software RAID state, disk counts, required disks, blocks, and synced blocks (`node_md_*`). |
@@ -139,6 +141,7 @@ You can't supply custom commands.
 | `udp_queues` | `/proc/net/udp` and `/proc/net/udp6`. | Aggregated transmit and receive queue memory gauges by IP version (`node_udp_queues`). |
 | `uname` | `uname -s`, `uname -n`, `uname -r`, `uname -v`, `uname -m`, and `/proc/sys/kernel/domainname`. | Kernel and host identity (`node_uname_info`). |
 | `vmstat` | `/proc/vmstat`. | Selected virtual memory statistics (`node_vmstat_*`), with fields matching `^(oom_kill\|pgpg\|pswp\|pg.*fault).*`. |
+| `xfs` | `ls -1 /sys/fs/xfs`, then `/sys/fs/xfs/<device>/stats/stats` per validated device. | All 39 upstream XFS counter families (`node_xfs_*`): extent allocation, allocation and block-mapping B-trees, block mapping, directory and inode operations, reads, writes, vnodes, and byte counts. Other procfs XFS statistics aren't exported. |
 | `zfs` | Eleven fixed files under `/proc/spl/kstat/zfs`: `abdstats`, `arcstats`, `dbufstats`, `dmu_tx`, `dnodestats`, `fm`, `vdev_cache_stats`, `vdev_mirror_stats`, `xuio_stats`, `zfetchstats`, and `zil`. | Numeric kstat families (`node_zfs_*`). Pool and dataset families (`node_zfs_zpool_*` and `node_zfs_zpool_dataset_*`), including pool state, are omitted. |
 
 The `netclass` collector reads these fixed attributes under each validated `/sys/class/net/<interface>/` path: `addr_assign_type`, `carrier`, `carrier_changes`, `carrier_up_count`, `carrier_down_count`, `dev_id`, `dormant`, `flags`, `ifindex`, `iflink`, `link_mode`, `mtu`, `name_assign_type`, `netdev_group`, `speed`, `tx_queue_len`, `type`, `address`, `broadcast`, `duplex`, `operstate`, and `ifalias`.
@@ -173,6 +176,41 @@ At most `16` filesystems fit the `64` second-level listing budget.
 Device-size files and allocation-mode files also consume the shared `1024` additional-read budget.
 It accepts the allocation modes `single`, `dup`, `raid0`, `raid1`, `raid10`, `raid1c3`, `raid1c4`, `raid5`, and `raid6`.
 Device error counters for write, read, flush, corruption, and generation errors aren't available through these sysfs reads.
+
+The `xfs` collector reads one stats file per device.
+At most `512` devices fit the `20,000`-series cap (`19,968` series); `513` don't (`20,007`).
+Each stats file is limited to `64 KiB`, `128` rows including a trailing empty row, `1024` bytes per row, `32` tokens per row, and `32` bytes per token.
+
+The `bcache` collector reads `average_key_size`, `btree_cache_size`, `cache_available_percent`, `congested`, `root_usage_percent`, `tree_depth`, `internal/active_journal_entries`, `internal/btree_nodes`, `internal/btree_read_average_duration_us`, and `internal/cache_read_races` under each validated `/sys/fs/bcache/<cache-set>/` directory.
+Under each validated `bdev<N>` entry it reads `dirty_data`, `writeback_rate_debug`, `stats_total/bypassed`, `stats_total/cache_hits`, `stats_total/cache_misses`, `stats_total/cache_bypass_hits`, `stats_total/cache_bypass_misses`, `stats_total/cache_miss_collisions`, and `stats_total/cache_readaheads`.
+Under each validated `cache<N>` entry it reads `io_errors`, `metadata_written`, and `written`.
+It doesn't read `priority_stats`, cache-set `stats_total` or `stats_five_minute`, or backing-device `stats_five_minute`.
+The omitted opt-in families are `node_bcache_priority_stats_unused_percent` and `node_bcache_priority_stats_metadata_percent`.
+At most `64` cache sets fit the second-level listing budget.
+Each set costs `11` additional reads, each backing device costs `9`, and each cache device costs `3`, all within the shared `1024` per-collector budget.
+For example, one set leaves room for `112` backing devices or `337` cache devices, but not `113` or `338`, respectively.
+Numeric attributes are limited to `64` raw bytes and `32` bytes after trimming whitespace.
+Each `writeback_rate_debug` file is limited to `4096` bytes, `64` rows including a trailing empty row, and `256` bytes per row.
+
+The `infiniband` collector reads these files under each validated `/sys/class/infiniband/<device>/ports/<port>/` directory:
+
+- `state`, `phys_state`, and `rate` provide port state and rate values.
+- `counters_ext/port_multicast_rcv_packets`, `counters_ext/port_multicast_xmit_packets`, `counters_ext/port_rcv_data_64`, `counters_ext/port_rcv_packets_64`, `counters_ext/port_unicast_rcv_packets`, `counters_ext/port_unicast_xmit_packets`, `counters_ext/port_xmit_data_64`, and `counters_ext/port_xmit_packets_64` provide legacy counters.
+- `counters/link_downed`, `counters/link_error_recovery`, `counters/multicast_rcv_packets`, `counters/multicast_xmit_packets`, `counters/port_rcv_constraint_errors`, `counters/port_xmit_constraint_errors`, `counters/port_rcv_data`, `counters/port_xmit_data`, `counters/port_rcv_discards`, `counters/port_xmit_discards`, `counters/port_rcv_errors`, `counters/port_rcv_packets`, `counters/port_xmit_packets`, `counters/port_xmit_wait`, `counters/unicast_rcv_packets`, and `counters/unicast_xmit_packets` provide port counters.
+
+The six upstream families without oracle samples aren't collected: `excessive_buffer_overrun_errors_total`, `local_link_integrity_errors_total`, `port_receive_remote_physical_errors_total`, `port_receive_switch_relay_errors_total`, `symbol_error_total`, and `vl15_dropped_total`, all under `node_infiniband_`.
+It doesn't read `link_layer`, `node_guid`, or `hw_counters`.
+At most `64` devices fit the second-level listing budget.
+Each device costs `4` additional reads, and each port costs `27`, sharing the `1024` per-collector budget across all devices.
+For example, one device leaves room for `37` ports (`1003` additional reads); `38` ports exceed the budget (`1030`).
+Port names must be canonical unsigned 32-bit integers.
+Device identity and port attributes are limited to `256` bytes, with numeric counters limited to `20` trimmed bytes.
+
+The `xfs`, `bcache`, and `infiniband` listings must end in a newline and contain at most `1024` nonempty rows of at most `4096` bytes each.
+Duplicate accepted names fail the collector.
+XFS and bcache skip unsafe names; InfiniBand rejects them.
+These collectors don't request readlink reads: validated sysfs paths supply their attribute reads directly.
+Missing files or directories can yield success with omitted samples; timeouts, truncation, malformed values, and exceeded limits fail the collector atomically.
 
 The metric names are compatible with node_exporter for the supported families, not its entire collector set.
 The `cpu` collector doesn't collect CPU information or `/sys`-derived families; `cpufreq` collects the supported sysfs frequency families.

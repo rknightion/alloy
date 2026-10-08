@@ -71,13 +71,13 @@ func TestBcacheRegistration(t *testing.T) {
 	cs, err := Build([]string{"bcache"}, DefaultConfigs(), nil)
 	require.NoError(t, err)
 	require.Len(t, cs, 1)
-	require.NotContains(t, DefaultEnabled(), "bcache")
+	require.Contains(t, DefaultEnabled(), "bcache")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "bcache" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

@@ -75,13 +75,13 @@ func TestInfinibandRegistration(t *testing.T) {
 	built, err := Build([]string{"infiniband"}, DefaultConfigs(), nil)
 	require.NoError(t, err)
 	require.Len(t, built, 1)
-	require.NotContains(t, DefaultEnabled(), "infiniband")
+	require.Contains(t, DefaultEnabled(), "infiniband")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "infiniband" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

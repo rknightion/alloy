@@ -43,13 +43,13 @@ func TestXfsRegistration(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, built, 1)
 	require.Equal(t, "xfs", built[0].Name())
-	require.NotContains(t, DefaultEnabled(), "xfs")
+	require.Contains(t, DefaultEnabled(), "xfs")
 	found := false
 	for _, r := range Registered() {
 		if r.Name == "xfs" {
 			found = true
 			require.Equal(t, "linux", r.OS)
-			require.False(t, r.DefaultEnabled)
+			require.True(t, r.DefaultEnabled)
 		}
 	}
 	require.True(t, found)

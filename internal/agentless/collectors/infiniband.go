@@ -26,7 +26,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "infiniband", OS: "linux", DefaultEnabled: false, Factory: newInfinibandCollector})
+	Register(Registration{Name: "infiniband", OS: "linux", DefaultEnabled: true, Factory: newInfinibandCollector})
 }
 
 const infinibandRoot = "/sys/class/infiniband"

@@ -493,6 +493,9 @@ var hostileStorageCases = map[string]string{
 	"fibrechannel": "host0\n",
 	"tapestats":    "st0\n",
 	"btrfs":        "11111111-1111-1111-1111-111111111111\n",
+	"xfs":          "sda1\n",
+	"bcache":       "11111111-1111-1111-1111-111111111111\n",
+	"infiniband":   "mlx4_0\n",
 }
 
 func TestHostileDefaultCoverage(t *testing.T) {
@@ -528,6 +531,18 @@ func hostileStorageExpanded(t *testing.T, collector agentless.Collector) {
 		} else if strings.HasSuffix(read.Path, "/metadata_uuid") {
 			value = hostileStorageCases["btrfs"]
 		}
+		switch collector.Name() {
+		case "xfs":
+			value = "rw 1 2\n"
+		case "bcache":
+			if len(read.Argv) != 0 {
+				value = "bdev0\ncache0\n"
+			}
+		case "infiniband":
+			if len(read.Argv) != 0 {
+				value = "1\n"
+			}
+		}
 		put(read, value)
 	}
 	var third []agentless.Read
@@ -535,7 +550,18 @@ func hostileStorageExpanded(t *testing.T, collector agentless.Collector) {
 		third, err = deep.ExpandDeep(agentless.Target{}, agentless.Input(results))
 		require.NoError(t, err)
 		for _, read := range third {
-			put(read, "1\n")
+			value := "1\n"
+			switch {
+			case collector.Name() == "bcache" && strings.HasSuffix(read.Path, "/writeback_rate_debug"):
+				value = "target: 1\nrate: 1/sec\nproportional: 1\nintegral: 1\nchange: 1\n"
+			case collector.Name() == "infiniband" && strings.HasSuffix(read.Path, "/state"):
+				value = "4: ACTIVE\n"
+			case collector.Name() == "infiniband" && strings.HasSuffix(read.Path, "/phys_state"):
+				value = "5: LinkUp\n"
+			case collector.Name() == "infiniband" && strings.HasSuffix(read.Path, "/rate"):
+				value = "40 Gb/sec\n"
+			}
+			put(read, value)
 		}
 	}
 	reads := append(append(append([]agentless.Read{}, collector.Reads()...), second...), third...)
@@ -620,6 +646,12 @@ func hostileStorageExpanded(t *testing.T, collector agentless.Collector) {
 					wantSeries = 10
 				case "btrfs":
 					wantSeries, wantCalls = 15, 3
+				case "xfs":
+					wantSeries = 39
+				case "bcache":
+					wantSeries, wantCalls = 26, 3
+				case "infiniband":
+					wantSeries, wantCalls = 28, 3
 				}
 				require.Equal(t, wantSeries, series)
 				require.Len(t, runner.batches, wantCalls)

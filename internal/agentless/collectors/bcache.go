@@ -26,7 +26,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "bcache", OS: "linux", DefaultEnabled: false, Factory: newBcacheCollector})
+	Register(Registration{Name: "bcache", OS: "linux", DefaultEnabled: true, Factory: newBcacheCollector})
 }
 
 const (

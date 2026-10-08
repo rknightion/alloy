@@ -23,7 +23,7 @@ import (
 )
 
 func init() {
-	Register(Registration{Name: "xfs", OS: "linux", DefaultEnabled: false, Factory: newXfsCollector})
+	Register(Registration{Name: "xfs", OS: "linux", DefaultEnabled: true, Factory: newXfsCollector})
 }
 
 // All 39 families exported by the pinned upstream collector are ported.
