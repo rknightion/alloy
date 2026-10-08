@@ -72,11 +72,51 @@ func Build(reads []agentless.Read, nonce string) (string, error) {
 		if read.Path != "" {
 			fmt.Fprintf(&script, "if [ -e %s ]; then\ncat %s\nstatus=$?\nelse\nstatus=1\nmissing=1\nfi\n", read.Path, read.Path)
 		} else {
-			fmt.Fprintf(&script, "if command -v %s >/dev/null 2>&1; then\n( %s )\nstatus=$?\nelse\nstatus=127\nmissing=1\nfi\n", read.Argv[0], strings.Join(read.Argv, " "))
+			fmt.Fprintf(&script, "if command -v %s >/dev/null 2>&1; then\n( %s )\nstatus=$?\n", read.Argv[0], strings.Join(read.Argv, " "))
+			listingMissing(&script, read.Argv)
+			script.WriteString("else\nstatus=127\nmissing=1\nfi\n")
 		}
 		fmt.Fprintf(&script, "printf '\\n%s:%d:end:%%s:%%s\\n' \"$status\" \"$missing\"\n", nonce, i)
 	}
 	return script.String(), nil
+}
+
+// listingMissing only annotates failures of the existing fixed listing form.
+// Check every searchable directory prefix in a subshell: a false -e on the
+// full path alone cannot distinguish absence from a denied/wrong-kind ancestor
+// or a bad symlink. Check -L as well so dangling links are not called absent.
+// Keep the command's status and stdout, and leave all other forms untouched.
+func listingMissing(script *strings.Builder, argv []string) {
+	if len(argv) != 3 || argv[0] != "ls" || argv[1] != "-1" || !strings.HasPrefix(argv[2], "/") {
+		return
+	}
+	path := argv[2]
+	// Linux lookup length errors are not evidence of absence. This is only
+	// conservative classification, not a change to Read admission or budgets.
+	if len(path) >= 4096 {
+		return
+	}
+	components := strings.Split(path, "/")
+	for _, component := range components {
+		if len(component) > 255 {
+			return
+		}
+	}
+	script.WriteString("if [ \"$status\" -ne 0 ] && (\n")
+	root := "/"
+	if strings.HasPrefix(path, "//") && !strings.HasPrefix(path, "///") {
+		root = "//" // POSIX permits a distinct root for exactly two slashes.
+	}
+	fmt.Fprintf(script, "[ -d %s ] && [ -x %s ] || exit 1\n", root, root)
+	prefix := strings.TrimSuffix(root, "/")
+	for _, component := range components {
+		if component == "" {
+			continue
+		}
+		prefix += "/" + component
+		fmt.Fprintf(script, "if [ ! -e %s ] && [ ! -L %s ]; then exit 0; fi\n[ -d %s ] && [ -x %s ] || exit 1\n", prefix, prefix, prefix, prefix)
+	}
+	script.WriteString("exit 1\n); then\nmissing=1\nfi\n")
 }
 
 func validate(reads []agentless.Read, nonce string) error {

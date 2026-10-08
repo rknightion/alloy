@@ -50,6 +50,8 @@ type testServer struct {
 	peerPause atomic.Duration
 	paused    atomic.Bool
 	probes    atomic.Int32
+
+	configureCommand func(*exec.Cmd) // Optional, test-only child setup; guarded by mu.
 }
 
 // authTrace records only lifecycle labels and elapsed times, never SSH payloads.
@@ -228,6 +230,11 @@ func (s *testServer) session(c ssh.Channel, reqs <-chan *ssh.Request, connection
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		cmd := exec.CommandContext(ctx, "sh", "-s")
+		s.mu.Lock()
+		if s.configureCommand != nil {
+			s.configureCommand(cmd)
+		}
+		s.mu.Unlock()
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = c, c, io.Discard
 		cmd.WaitDelay = 100 * time.Millisecond
 		record("server command starting")
